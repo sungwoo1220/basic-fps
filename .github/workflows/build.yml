@@ -19,9 +19,7 @@ jobs:
           import base64,gzip,json,pathlib,re
           p=pathlib.Path('.')
           text=''.join((p/'.bootstrap'/f'{i}.b64').read_text(encoding='utf-8') for i in range(4))
-          text=text.replace('к','k')
-          text=re.sub(r'\s+','',text)
-          files=json.loads(gzip.decompress(base64.b64decode(text,validate=True)))
+          files=json.loads(gzip.decompress(base64.b64decode(re.sub(r'\s+','',text.replace('к','k')),validate=True)))
           for name,content in files.items():
             target=p/name
             if '..' in target.parts or target.is_absolute(): raise ValueError(name)
@@ -33,7 +31,20 @@ jobs:
         shell: pwsh
         run: Copy-Item node_modules/three/build/three.module.js game/public/three.module.js
       - run: npm test
-      - run: npm run build
+      - name: Build installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          npm run build -- --publish never 2>&1 | Tee-Object -FilePath build-log.txt
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Publish diagnostics on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          if (Test-Path build-log.txt) { gh release create "diagnostic-${{ github.run_number }}" build-log.txt --prerelease --title "Build diagnostic" --notes "Build failed; not a playable release." }
       - name: Prepare patch
         shell: pwsh
         run: |
