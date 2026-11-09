@@ -1,0 +1,47 @@
+name: Build and release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Restore source
+        shell: python
+        run: |
+          import base64,gzip,json,pathlib,re
+          p=pathlib.Path('.')
+          text=''.join((p/'.bootstrap'/f'{i}.b64').read_text(encoding='utf-8') for i in range(4))
+          text=text.replace('к','k')
+          text=re.sub(r'\s+','',text)
+          files=json.loads(gzip.decompress(base64.b64decode(text,validate=True)))
+          for name,content in files.items():
+            target=p/name
+            if '..' in target.parts or target.is_absolute(): raise ValueError(name)
+            if not target.exists():
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_text(content,encoding='utf-8')
+      - run: npm install
+      - name: Bundle Three.js
+        shell: pwsh
+        run: Copy-Item node_modules/three/build/three.module.js game/public/three.module.js
+      - run: npm test
+      - run: npm run build
+      - name: Prepare patch
+        shell: pwsh
+        run: |
+          $env:RELEASE_TAG = "build-${{ github.run_number }}-${{ github.run_attempt }}"
+          node publish.cjs
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "Windows launcher installer and incremental game update."
