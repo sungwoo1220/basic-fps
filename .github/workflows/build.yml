@@ -27,11 +27,15 @@ jobs:
               target.parent.mkdir(parents=True,exist_ok=True)
               target.write_text(content,encoding='utf-8')
           subprocess.run(['python','apply-patches.py'],check=True)
+          subprocess.run(['python','mobile-patch.py'],check=True)
       - run: npm install
       - name: Bundle Three.js
         shell: pwsh
         run: Copy-Item node_modules/three/build/three.module.js game/public/three.module.js
       - run: npm test
+      - name: Check mobile game syntax
+        shell: bash
+        run: node --input-type=module --check < game/public/game.js
       - name: Build installer
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,13 +43,6 @@ jobs:
         run: |
           npm run build -- --publish never 2>&1 | Tee-Object -FilePath build-log.txt
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      - name: Publish diagnostics on failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          if (Test-Path build-log.txt) { gh release create "diagnostic-${{ github.run_number }}" build-log.txt --prerelease --title "Build diagnostic" --notes "Build failed; not a playable release." }
       - name: Prepare patch
         shell: pwsh
         run: |
@@ -55,5 +52,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: |
-          gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "Short world-space bullet tracers using authoritative shot endpoints."
+        run: gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "Mobile browser touch controls."
