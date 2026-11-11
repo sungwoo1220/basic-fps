@@ -1,0 +1,46 @@
+{
+  "name": "basic-fps-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "game": "node scripts/copy-three.cjs && node game/server.js",
+    "pretest": "node scripts/copy-three.cjs",
+    "test": "node --check main.cjs && node --check game/server.js && node --check game/public/shared.js && node --input-type=module --check < game/public/game.js && node game/tests/regression.cjs && node game/tests/server.cjs && node game/tests/launcher.cjs",
+    "build": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "electron": "38.0.0",
+    "electron-builder": "26.0.12",
+    "three": "0.170.0"
+  },
+  "build": {
+    "appId": "com.basicfps.launcher",
+    "productName": "Basic FPS Launcher",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "index.html",
+      "ui.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false,
+      "artifactName": "Basic-FPS-Launcher-Setup.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
