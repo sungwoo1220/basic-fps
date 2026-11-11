@@ -5,6 +5,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: release-main
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-latest
@@ -26,22 +29,24 @@ jobs:
             if not target.exists():
               target.parent.mkdir(parents=True,exist_ok=True)
               target.write_text(content,encoding='utf-8')
-          subprocess.run(['python','apply-patches.py'],check=True)
-          subprocess.run(['python','mobile-patch.py'],check=True)
+          for script in ['apply-patches.py','mobile-patch.py','reload-patch.py']:
+            subprocess.run(['python',script],check=True)
       - run: npm install
       - name: Bundle Three.js
         shell: pwsh
         run: Copy-Item node_modules/three/build/three.module.js game/public/three.module.js
       - run: npm test
-      - name: Check mobile game syntax
+      - name: Syntax checks
         shell: bash
-        run: node --input-type=module --check < game/public/game.js
+        run: |
+          node --check game/server.js
+          node --input-type=module --check < game/public/game.js
       - name: Build installer
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          npm run build -- --publish never 2>&1 | Tee-Object -FilePath build-log.txt
+          npm run build -- --publish never
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Prepare patch
         shell: pwsh
@@ -52,4 +57,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
-        run: gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "Mobile browser touch controls."
+        run: gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "12-round magazine and reload controls."
