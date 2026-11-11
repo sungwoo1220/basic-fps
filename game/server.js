@@ -161,7 +161,6 @@ wss.on('connection',ws=>{
   });
   ws.on('message',raw=>{
     const now=performance.now();
-  for(const q of players.values())if(q.reloadUntil&&now>=q.reloadUntil){q.ammo=12;q.reloadUntil=0;}
     if(now-p.rateTime>=1000) {
       p.rateTime=now;
       p.rate=0;
@@ -212,6 +211,7 @@ setInterval(()=>{
   const now=performance.now(),dt=Math.min((now-lastTick)/1000,.1);
   lastTick=now;
   for(const p of players.values())record(p,now);
+  for(const p of players.values())if(p.reloadUntil&&now>=p.reloadUntil){p.ammo=12;p.reloadUntil=0;}
   for(const p of players.values()) {
     if(p.bot){
       if(p.mode==='strafe'){

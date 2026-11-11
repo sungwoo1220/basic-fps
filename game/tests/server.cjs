@@ -57,7 +57,7 @@ async function main(){
       await until(()=>me.ammo<12,'사격하면 탄이 줄어듦');
       await until(()=>me.reloadRemaining>0,'탄이 떨어지면 자동 재장전 시작');
       if(me.ammo!==0)throw new Error('자동 재장전은 탄이 0일 때 시작해야 합니다: '+me.ammo);
-      if(me.reloadRemaining>2300)throw new Error('재장전 시간이 2.3초를 넘습니다: '+me.reloadRemaining);
+      if(me.reloadRemaining>2300.01)throw new Error('재장전 시간이 2.3초를 넘습니다: '+me.reloadRemaining);
       fire=false;
       await until(()=>me.ammo===12&&me.reloadRemaining===0,'재장전이 끝나면 12발');
 

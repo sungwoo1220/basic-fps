@@ -54,6 +54,9 @@ scene.add(world);
 const grid=new THREE.GridHelper(40,20,0x607789,0x798d9d);
 grid.position.y=.003;
 scene.add(grid);
+grid.updateMatrix();
+grid.matrixAutoUpdate=false;
+world.matrixAutoUpdate=false;
 const gun=new THREE.Group();
 function gunPart(x,y,z,w,h,d,color) {
   const m=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({
@@ -84,7 +87,7 @@ outlines.frustumCulled = false;
 outlines.count = 0;
 scene.add(outlines);
 
-const normalColor=new THREE.Color(0x252a30),shieldColor=new THREE.Color(0x75dacf);
+const normalColor=new THREE.Color(0x252a30),shieldColor=new THREE.Color(0x75dacf),bloodColor=new THREE.Color(0xa81524);
 const remote=new Map();
 const effects=new THREE.InstancedMesh(geometry,new THREE.MeshBasicMaterial({
   color:0xffcf83
@@ -215,10 +218,20 @@ document.addEventListener('visibilitychange',()=>{
   lastTime=performance.now();
   if(document.hidden)document.exitPointerLock();
 });
+const degreesPerCount=Math.PI/180*.07;
+let lastRawMove=-1000;
+function aim(dx,dy) {
+  yaw=(yaw-dx*degreesPerCount*sensitivity)%(Math.PI*2);
+  pitch=Math.max(-1.45,Math.min(1.45,pitch-dy*degreesPerCount*sensitivity));
+}
+document.addEventListener('pointerrawupdate',e=>{
+  if(mobileMode||!locked()||!(e.movementX||e.movementY))return;
+  lastRawMove=performance.now();
+  aim(e.movementX,e.movementY);
+});
 addEventListener('mousemove',e=>{
-  if(!locked())return;
-  yaw=(yaw-e.movementX*(Math.PI / 180 * .07)*sensitivity)%(Math.PI*2);
-  pitch=Math.max(-1.45,Math.min(1.45,pitch-e.movementY*(Math.PI / 180 * .07)*sensitivity));
+  if(!locked()||performance.now()-lastRawMove<100)return;
+  aim(e.movementX,e.movementY);
 });
 addEventListener('keydown',e=>{
   if(!locked())return;
@@ -431,7 +444,7 @@ function updateEffects(now) {
     transform.position.set(fx.x,fx.y,fx.z);
     transform.scale.set(.07,.07,.07);
     transform.updateMatrix();
-    effects.setColorAt(count,new THREE.Color(0xa81524));
+    effects.setColorAt(count,bloodColor);
     effects.setMatrixAt(count++,transform.matrix);
   }
   effects.count=count;
@@ -448,7 +461,7 @@ function frame(now) {
     simulate(now);
     accumulator-=arena.step;
   }
-  if(now-lastFlush>=30)flush(now);
+  if(now-lastFlush>=17)flush(now);
   const decay=Math.exp(-20*dt);
   offsetX*=decay;
   offsetZ*=decay;
@@ -483,9 +496,10 @@ function frame(now) {
     el.feed.textContent=text;
     lastFeed=text;
   }
-  if(fpsLimit>0){
+  const limit=locked()?fpsLimit:(fpsLimit>0?Math.min(fpsLimit,30):30);
+  if(limit>0){
     if(now+0.01<nextRenderAt)return;
-    const interval=1000/fpsLimit;
+    const interval=1000/limit;
     nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
   }else nextRenderAt=0;
   renderer.render(scene,camera);

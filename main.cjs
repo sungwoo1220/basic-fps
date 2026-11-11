@@ -5,6 +5,8 @@ const path=require('path');
 const crypto=require('crypto');
 const {spawn}=require('child_process');
 const repo='sungwoo1220/basic-fps';
+app.commandLine.appendSwitch('disable-frame-rate-limit');
+app.commandLine.appendSwitch('disable-gpu-vsync');
 let win,server,game,busy=false,gameReady=false;
 const root=()=>path.join(app.getPath('userData'),'game');
 function emit(text){if(win&&!win.isDestroyed())win.webContents.send('status',text);}
@@ -72,7 +74,7 @@ async function start(host,address){
   const started=await new Promise(resolve=>{const timer=setTimeout(()=>resolve(false),10000);server.stdout.once('data',()=>{clearTimeout(timer);resolve(true);});server.once('exit',()=>{clearTimeout(timer);resolve(false);});});
   if(!started){emit('서버를 시작하지 못했습니다. 기존 서버를 종료하세요. '+errors);if(server)server.kill();server=null;return;}
  }
- game=new BrowserWindow({width:1280,height:800,autoHideMenuBar:true,backgroundColor:'#17202b',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
+ game=new BrowserWindow({width:1280,height:800,autoHideMenuBar:true,backgroundColor:'#17202b',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,backgroundThrottling:false}});
  const g=game;
  g.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  g.webContents.on('will-navigate',(event,url)=>{try{if(new URL(url).origin!==target.origin)event.preventDefault();}catch{event.preventDefault();}});

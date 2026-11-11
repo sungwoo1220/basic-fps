@@ -56,7 +56,7 @@ async function main(){
   const appDir=path.join(tmp,'app');
   fs.mkdirSync(appDir,{recursive:true});
   fs.symlinkSync(path.dirname(path.dirname(require.resolve('ws'))),path.join(appDir,'node_modules'),'junction');
-  const electron={app:{getPath:()=>userData,getAppPath:()=>appDir,whenReady:()=>Promise.resolve(),on(){}},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},dialog:{}};
+  const electron={app:{getPath:()=>userData,getAppPath:()=>appDir,commandLine:{appendSwitch(){}},whenReady:()=>Promise.resolve(),on(){}},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},dialog:{}};
   const load=Module._load;
   Module._load=function(request,...rest){return request==='electron'?electron:load.call(this,request,...rest);};
   require(path.join(root,'main.cjs'));
