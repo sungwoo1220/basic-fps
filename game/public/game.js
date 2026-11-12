@@ -166,7 +166,7 @@ function resize() {
   }
   if(aaSamples>0) {
     const size=renderer.getDrawingBufferSize(new THREE.Vector2());
-    aaTarget=new THREE.WebGLRenderTarget(size.x,size.y,{samples:aaSamples,colorSpace:THREE.SRGBColorSpace});
+    aaTarget=new THREE.WebGLRenderTarget(size.x,size.y,{samples:aaSamples,colorSpace:THREE.SRGBColorSpace,resolveDepthBuffer:false});
     blitMaterial.map=aaTarget.texture;
     blitMaterial.needsUpdate=true;
   }
