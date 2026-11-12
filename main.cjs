@@ -7,6 +7,7 @@ const {spawn}=require('child_process');
 const repo='sungwoo1220/basic-fps';
 app.commandLine.appendSwitch('disable-frame-rate-limit');
 app.commandLine.appendSwitch('disable-gpu-vsync');
+app.commandLine.appendSwitch('force_high_performance_gpu');
 let win,server,game,busy=false,gameReady=false;
 const root=()=>path.join(app.getPath('userData'),'game');
 function emit(text){if(win&&!win.isDestroyed())win.webContents.send('status',text);}
