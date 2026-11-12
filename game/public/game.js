@@ -472,18 +472,47 @@ function updateEffects(now) {
   effects.count=count;
   if(count){effects.instanceMatrix.needsUpdate=true;if(effects.instanceColor)effects.instanceColor.needsUpdate=true;}
 }
-function frame(now) {
+const tick=new MessageChannel();
+tick.port1.onmessage=()=>frame();
+function schedule(wait) {
+  if(wait>8)setTimeout(frame,wait-4);
+  else tick.port2.postMessage(0);
+}
+const gl=renderer.getContext();
+const fences=[];
+function gpuBusy(now) {
+  if(!gl.fenceSync)return false;
+  while(fences.length&&(now-fences[0].at>500||gl.getSyncParameter(fences[0].sync,gl.SYNC_STATUS)===gl.SIGNALED))gl.deleteSync(fences.shift().sync);
+  return fences.length>=2;
+}
+function frame() {
+  const now=performance.now();
+  if(document.hidden) {
+    lastTime=now;
+    nextRenderAt=0;
+    setTimeout(frame,250);
+    return;
+  }
   const menu=!locked();
-  if(menu)setTimeout(()=>requestAnimationFrame(frame),33);
-  else requestAnimationFrame(frame);
-  if(!menu&&fpsLimit>0) {
-    if(now+0.01<nextRenderAt)return;
-    const interval=1000/fpsLimit;
-    nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
-  }else nextRenderAt=0;
+  if(menu)nextRenderAt=0;
+  else {
+    if(fpsLimit>0&&now<nextRenderAt) {
+      schedule(nextRenderAt-now);
+      return;
+    }
+    if(gpuBusy(now)) {
+      schedule(0);
+      return;
+    }
+    if(fpsLimit>0) {
+      const interval=1000/fpsLimit;
+      nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
+    }
+    else nextRenderAt=0;
+  }
+  schedule(menu?33:0);
   const dt=Math.min((now-lastTime)/1000,.1);
   lastTime=now;
-  if(document.hidden)return;
   accumulator=Math.min(accumulator+dt,.1);
   let steps=0;
   while(accumulator>=arena.step&&steps++<6) {
@@ -533,6 +562,10 @@ function frame(now) {
     renderer.render(blitScene,blitCamera);
   }
   else renderer.render(scene,camera);
+  if(gl.fenceSync) {
+    fences.push({sync:gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0),at:now});
+    gl.flush();
+  }
   frames++;
   if(now-fpsTime>=1000) {
     el.fps.textContent=`${Math.round(frames*1000/(now-fpsTime))} FPS${gpuName?' · '+gpuName:''}`;
@@ -540,7 +573,7 @@ function frame(now) {
     fpsTime=now;
   }
 }
-requestAnimationFrame(frame);
+frame();
 
 document.getElementById('botsApply').onclick=()=>send({type:'bots',count:Number(document.getElementById('botsCount').value)});
 
