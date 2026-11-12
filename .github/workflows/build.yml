@@ -16,21 +16,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Restore source
-        shell: python
-        run: |
-          import base64,gzip,json,pathlib,re,subprocess
-          p=pathlib.Path('.')
-          text=''.join((p/'.bootstrap'/f'{i}.b64').read_text(encoding='utf-8') for i in range(4))
-          files=json.loads(gzip.decompress(base64.b64decode(re.sub(r'\s+','',text.replace('к','k')),validate=True)))
-          for name,content in files.items():
-            target=p/name
-            if '..' in target.parts or target.is_absolute(): raise ValueError(name)
-            if not target.exists():
-              target.parent.mkdir(parents=True,exist_ok=True)
-              target.write_text(content,encoding='utf-8')
-          for script in ['apply-patches.py','mobile-patch.py','reload-patch.py']:
-            subprocess.run(['python',script],check=True)
       - run: npm install
       - name: Bundle Three.js
         shell: pwsh

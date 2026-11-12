@@ -1,0 +1,25 @@
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; word-break: keep-all; background: #17202b; color: #eef3fa; font-family: Arial, 'Malgun Gothic', sans-serif; }
+canvas { display: block; }
+#menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #101824e8; z-index: 5; }
+section { width: 420px; max-width: 94vw; max-height: 95vh; overflow: auto; background: #1b2839; padding: 28px; border: 1px solid #496078; border-radius: 16px; }
+h1 { letter-spacing: 3px; }
+label { display: block; margin: 16px 0; }
+input { margin-top: 8px; }
+input:not([type=range]), select { width: 100%; padding: 10px; background: #101824; color: white; border: 1px solid #496078; }
+select { margin-top: 8px; }
+input[type=range] { width: 70%; vertical-align: middle; }
+button { width: 100%; padding: 13px; background: #73ddc2; color: #112831; border: 0; border-radius: 6px; font-size: 17px; cursor: pointer; }
+button:disabled { opacity: .5; }
+p, small { line-height: 1.7; color: #b6c6d9; }
+#crosshair, #hit { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; font-size: 24px; text-shadow: 0 1px 3px black; }
+#hit { display: none; color: #ffca70; font-size: 38px; }
+#hud { position: fixed; bottom: 25px; left: 25px; font-size: 23px; text-shadow: 0 1px 4px black; pointer-events: none; }
+#fps { position: fixed; top: 16px; left: 20px; color: #d7e9f4; font-size: 14px; pointer-events: none; }
+#feed { position: fixed; top: 20px; right: 20px; white-space: pre-line; text-shadow: 0 1px 4px black; pointer-events: none; }
+#board { position: fixed; top: 15%; left: 50%; transform: translateX(-50%); padding: 25px; background: #101824ed; min-width: 340px; white-space: pre; font-family: monospace; line-height: 1.8; pointer-events: none; }
+
+#hit { display: none !important; }
+
+#touchUI[hidden]{display:none}#touchUI{position:fixed;inset:0;z-index:4;pointer-events:none;user-select:none;-webkit-user-select:none}#touchUI>*{pointer-events:auto;touch-action:none}#touchMove{position:absolute;left:max(24px,env(safe-area-inset-left));bottom:30px;width:140px;height:140px;border-radius:50%;background:#ffffff20;border:2px solid #ffffff70;display:flex;align-items:center;justify-content:center}#touchMove span{width:45px;height:45px;border-radius:50%;background:#ffffff70;pointer-events:none}#touchLook{position:absolute;left:45%;right:0;top:60px;bottom:0}#touchUI button{position:absolute;border-radius:50%;background:#263749aa;color:white;border:2px solid #ffffff90;font-size:17px}#touchFire{right:30px;bottom:45px;width:86px;height:86px}#touchWalk{right:130px;bottom:35px;width:60px;height:60px}#touchMenu{right:15px;top:12px;width:58px;height:42px;border-radius:12px!important}
+#touchUI button{padding:0;line-height:1;white-space:nowrap}#touchReload{right:42px;bottom:145px;width:62px;height:62px;font-size:15px}

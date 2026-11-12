@@ -1,2 +1,38 @@
-# basic-fps
-Basic FPS desktop launcher, incremental game updates and Windows builds.
+# Basic FPS Launcher
+
+Windows용 런처와 브라우저(WebGL) 기반 멀티플레이 FPS 게임입니다. 게임은 증분 업데이트되고, 설치 파일은 GitHub Actions가 만듭니다.
+
+## 처음 설치
+Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설치하세요. 서명 없는 개인용 설치 파일이라 Windows에서 게시자 확인 경고가 나올 수 있으니 출처를 확인하세요.
+
+런처 실행 → 자동 게임 패치 → 게임 실행. 내 PC에서 서버를 열거나 친구 서버 주소로 접속할 수 있습니다. 서버는 게임 창을 닫으면 함께 종료됩니다. 친구가 접속하려면 서버 PC의 TCP 3000 포트 방화벽/포트포워딩 설정이 필요합니다.
+
+## 게임
+- 이동 WASD, 걷기 Shift, 사격 왼쪽 클릭, 재장전 R(12발 탄창, 2.3초), 점수판 Tab, 메뉴 Esc
+- 휴대폰은 가로 화면에서 터치 조작(이동 패드, 시점 패드, 발사, 재장전, 걷기, 메뉴)을 씁니다. 마우스가 기본 입력인 PC는 터치스크린이 있어도 마우스 조작을 씁니다.
+- 서버가 이동·피해·탄약을 판정합니다. 최대 16명이며 연습 봇은 서버 PC에서만 바꿀 수 있습니다.
+
+## 폴더 구성
+- `main.cjs`, `preload.cjs`, `index.html`, `ui.js`: 런처(Electron). 바꾸면 새 설치 파일을 다시 설치해야 적용됩니다.
+- `game/server.js`, `game/launcher.html`, `game/public/`: 게임 서버와 화면. main에 올리면 릴리스로 배포되고 런처가 바뀐 파일만 받습니다.
+- `game/tests/`, `scripts/`: 자동 시험과 보조 스크립트.
+- `publish.cjs`: 릴리스용 업데이트 목록(`update.json`)과 파일 묶음을 만듭니다.
+- `.github/workflows/`: `build.yml`(main 푸시 시 시험 → 설치 파일 → 릴리스), `test.yml`(PR 시험만).
+
+## 패치 배포
+`game/server.js`나 `game/public/`를 고쳐 main에 올리면 Actions가 시험을 통과한 경우에만 릴리스를 만듭니다. 런처는 파일 SHA-256을 비교해 바뀐 파일만 받고, 삭제된 파일은 새 설치본에서 빠집니다. 업데이트가 실패하면 기존에 설치된 게임을 그대로 유지하고, 성공하면 이전 설치 폴더는 정리합니다. 게임이 켜져 있는 동안에는 업데이트를 막습니다.
+
+## 한계와 보안
+- 런처/Electron 자체의 변경은 업데이트로 교체되지 않습니다. 새 설치 파일을 다시 설치해야 합니다.
+- 업데이트는 GitHub HTTPS와 SHA-256 검증을 쓰지만 별도 서명 키로 목록에 서명하지는 않습니다. 저장소와 계정 보안이 신뢰의 기준이므로 GitHub 2단계 인증을 권장합니다. 배포 권한이 있는 사람의 패치 코드는 서버 프로세스로 실행됩니다.
+- 시점 보정과 이동 봇을 포함한 프로토타입입니다. 128틱 UDP나 완전한 안티치트는 아닙니다.
+- 토큰/비밀번호를 게임이나 공개 저장소에 넣지 마세요.
+
+## 개발
+Node.js 22 + `npm install`.
+- `npm test`: 문법 검사, 이동·판정 시험, 서버 탄창/재장전 시험, 런처 업데이트·실행 시험
+- `npm run game`: 게임 서버만 로컬에서 실행(http://localhost:3000). Three.js 파일은 자동으로 복사됩니다.
+- `npm start`: 런처 실행(Electron)
+- `npm run build`: Windows 설치 파일 생성(Windows에서만)
+
+main에 푸시하면 곧바로 릴리스가 만들어지니, 변경은 브랜치와 PR로 올려 `test.yml` 결과를 확인한 뒤 합치는 것을 권장합니다.
