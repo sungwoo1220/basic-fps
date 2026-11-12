@@ -8,7 +8,7 @@ const {
   arena,move,characterParts,weapon,movementSpread,recoveredBloom
 }
 =window.FPS;
-const el=Object.fromEntries(['menu','play','status','name','sens','sensValue','hud','feed','board','hit','quality','aa','fps'].map(id=>[id,document.getElementById(id)]));
+const el=Object.fromEntries(['menu','play','status','name','sens','sensValue','hud','feed','board','hit','aa','fps'].map(id=>[id,document.getElementById(id)]));
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x93a7bb);
 const camera=new THREE.PerspectiveCamera(70,1,.05,100);
@@ -112,7 +112,7 @@ const predicted={
 },keys=new Set(),pending=[],outgoing=[],feed=[];
 let localBloom=0;
 let ownId='',epoch=-1,connected=false,initialized=false,yaw=0,pitch=0,sensitivity=1,sequence=0;
-let offsetX=0,offsetZ=0,lastTime=performance.now(),accumulator=0,lastFlush=0,lastShot=-1000,flashUntil=0,hitUntil=0,recoil=0,frames=0,fpsTime=performance.now(),lastHud='',lastBoard='',lastFeed='',renderScale=1;
+let offsetX=0,offsetZ=0,lastTime=performance.now(),accumulator=0,lastShot=-1000,flashUntil=0,hitUntil=0,recoil=0,frames=0,fpsTime=performance.now(),lastHud='',lastBoard='',lastFeed='';
 function stored(key,fallback) {
   try {
     return localStorage.getItem(key)||fallback;
@@ -137,8 +137,6 @@ el.sens.oninput=()=>{
   el.sensValue.textContent=sensitivity.toFixed(3);
   save('fps-valorant-sensitivity',sensitivity);
 };
-el.quality.value=stored('fps-quality','1');
-renderScale=Number(el.quality.value)||1;
 let fpsLimit=Math.max(0,Math.min(1000,Math.round(Number(stored('fps-limit','0'))||0)));
 let nextRenderAt=0;
 const fpsLimitInput=document.getElementById('fpsLimit');
@@ -157,15 +155,10 @@ function resize() {
   camera.aspect=aspect;
   camera.fov=THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(51.5))/aspect));
   camera.updateProjectionMatrix();
-  renderer.setSize(Math.max(1,Math.floor(innerWidth*currentDpr*renderScale)),Math.max(1,Math.floor(innerHeight*currentDpr*renderScale)),false);
+  renderer.setSize(Math.max(1,Math.floor(innerWidth*currentDpr)),Math.max(1,Math.floor(innerHeight*currentDpr)),false);
   renderer.domElement.style.width='100vw';
   renderer.domElement.style.height='100vh';
 }
-el.quality.onchange=()=>{
-  renderScale=Number(el.quality.value)||1;
-  save('fps-quality',renderScale);
-  resize();
-};
 el.aa.value=antialias?'1':'0';
 el.aa.onchange=()=>{
   antialias=el.aa.value==='1';
@@ -390,7 +383,6 @@ function flush(now) {
   send({
     type:'inputs',items:outgoing.splice(0,12)
   });
-  lastFlush=now;
 }
 function simulate(now) {
   if(!initialized||!connected)return;
@@ -467,7 +459,14 @@ function updateEffects(now) {
   if(count){effects.instanceMatrix.needsUpdate=true;if(effects.instanceColor)effects.instanceColor.needsUpdate=true;}
 }
 function frame(now) {
-  requestAnimationFrame(frame);
+  const menu=!locked();
+  if(menu)setTimeout(()=>requestAnimationFrame(frame),33);
+  else requestAnimationFrame(frame);
+  if(!menu&&fpsLimit>0) {
+    if(now+0.01<nextRenderAt)return;
+    const interval=1000/fpsLimit;
+    nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
+  }else nextRenderAt=0;
   const dt=Math.min((now-lastTime)/1000,.1);
   lastTime=now;
   if(document.hidden)return;
@@ -477,7 +476,7 @@ function frame(now) {
     simulate(now);
     accumulator-=arena.step;
   }
-  if(now-lastFlush>=17)flush(now);
+  if(steps)flush(now);
   const decay=Math.exp(-20*dt);
   offsetX*=decay;
   offsetZ*=decay;
@@ -512,12 +511,6 @@ function frame(now) {
     el.feed.textContent=text;
     lastFeed=text;
   }
-  const limit=locked()?fpsLimit:(fpsLimit>0?Math.min(fpsLimit,30):30);
-  if(limit>0){
-    if(now+0.01<nextRenderAt)return;
-    const interval=1000/limit;
-    nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
-  }else nextRenderAt=0;
   if((devicePixelRatio||1)!==currentDpr)resize();
   renderer.render(scene,camera);
   frames++;

@@ -12,6 +12,7 @@ input[type=range] { width: 70%; vertical-align: middle; }
 button { width: 100%; padding: 13px; background: #73ddc2; color: #112831; border: 0; border-radius: 6px; font-size: 17px; cursor: pointer; }
 button:disabled { opacity: .5; }
 p, small { line-height: 1.7; color: #b6c6d9; }
+.hint { display: block; margin: -8px 0 16px; font-size: 13px; line-height: 1.6; }
 #crosshair, #hit { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; font-size: 24px; text-shadow: 0 1px 3px black; }
 #hit { display: none; color: #ffca70; font-size: 38px; }
 #hud { position: fixed; bottom: 25px; left: 25px; font-size: 23px; text-shadow: 0 1px 4px black; pointer-events: none; }
