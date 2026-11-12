@@ -14,15 +14,17 @@ scene.background=new THREE.Color(0x93a7bb);
 const camera=new THREE.PerspectiveCamera(70,1,.05,100);
 camera.rotation.order='YXZ';
 const tracers=createTracers(THREE,scene,camera);
-let antialias=stored('fps-antialias','1')==='1';
-function createRenderer() {
-  const r=new THREE.WebGLRenderer({antialias,powerPreference:'high-performance',alpha:false});
-  r.setPixelRatio(1);
-  r.outputColorSpace=THREE.SRGBColorSpace;
-  return r;
-}
-let renderer=createRenderer();
+const renderer=new THREE.WebGLRenderer({antialias:false,powerPreference:'high-performance',alpha:false});
+renderer.setPixelRatio(1);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
 document.body.appendChild(renderer.domElement);
+let aaSamples=0,aaTarget=null;
+const blitScene=new THREE.Scene();
+const blitCamera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const blitMaterial=new THREE.MeshBasicMaterial({depthTest:false,depthWrite:false});
+const blitQuad=new THREE.Mesh(new THREE.PlaneGeometry(2,2),blitMaterial);
+blitQuad.frustumCulled=false;
+blitScene.add(blitQuad);
 const material=new THREE.MeshBasicMaterial({
   color:0x687f90
 });
@@ -158,16 +160,25 @@ function resize() {
   renderer.setSize(Math.max(1,Math.floor(innerWidth*currentDpr)),Math.max(1,Math.floor(innerHeight*currentDpr)),false);
   renderer.domElement.style.width='100vw';
   renderer.domElement.style.height='100vh';
+  if(aaTarget) {
+    aaTarget.dispose();
+    aaTarget=null;
+  }
+  if(aaSamples>0) {
+    const size=renderer.getDrawingBufferSize(new THREE.Vector2());
+    aaTarget=new THREE.WebGLRenderTarget(size.x,size.y,{samples:aaSamples,colorSpace:THREE.SRGBColorSpace});
+    blitMaterial.map=aaTarget.texture;
+    blitMaterial.needsUpdate=true;
+  }
 }
-el.aa.value=antialias?'1':'0';
+const maxSamples=renderer.capabilities.maxSamples||0;
+for(const option of [...el.aa.options])if(Number(option.value)>maxSamples)option.remove();
+el.aa.value=stored('fps-msaa','4');
+if(el.aa.value==='')el.aa.value=String(Math.min(4,maxSamples));
+aaSamples=Number(el.aa.value)||0;
 el.aa.onchange=()=>{
-  antialias=el.aa.value==='1';
-  save('fps-antialias',antialias?'1':'0');
-  const old=renderer;
-  renderer=createRenderer();
-  old.domElement.replaceWith(renderer.domElement);
-  old.dispose();
-  old.forceContextLoss();
+  aaSamples=Number(el.aa.value)||0;
+  save('fps-msaa',aaSamples);
   resize();
 };
 addEventListener('resize',resize);
@@ -512,7 +523,13 @@ function frame(now) {
     lastFeed=text;
   }
   if((devicePixelRatio||1)!==currentDpr)resize();
-  renderer.render(scene,camera);
+  if(aaTarget) {
+    renderer.setRenderTarget(aaTarget);
+    renderer.render(scene,camera);
+    renderer.setRenderTarget(null);
+    renderer.render(blitScene,blitCamera);
+  }
+  else renderer.render(scene,camera);
   frames++;
   if(now-fpsTime>=1000) {
     el.fps.textContent=`${Math.round(frames*1000/(now-fpsTime))} FPS`;
