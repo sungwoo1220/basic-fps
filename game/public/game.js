@@ -8,17 +8,20 @@ const {
   arena,move,characterParts,weapon,movementSpread,recoveredBloom
 }
 =window.FPS;
-const el=Object.fromEntries(['menu','play','status','name','sens','sensValue','hud','feed','board','hit','quality','fps'].map(id=>[id,document.getElementById(id)]));
+const el=Object.fromEntries(['menu','play','status','name','sens','sensValue','hud','feed','board','hit','quality','aa','fps'].map(id=>[id,document.getElementById(id)]));
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x93a7bb);
 const camera=new THREE.PerspectiveCamera(70,1,.05,100);
 camera.rotation.order='YXZ';
 const tracers=createTracers(THREE,scene,camera);
-const renderer=new THREE.WebGLRenderer({
-  antialias:false,powerPreference:'high-performance',alpha:false
-});
-renderer.setPixelRatio(1);
-renderer.outputColorSpace=THREE.SRGBColorSpace;
+let antialias=stored('fps-antialias','1')==='1';
+function createRenderer() {
+  const r=new THREE.WebGLRenderer({antialias,powerPreference:'high-performance',alpha:false});
+  r.setPixelRatio(1);
+  r.outputColorSpace=THREE.SRGBColorSpace;
+  return r;
+}
+let renderer=createRenderer();
 document.body.appendChild(renderer.domElement);
 const material=new THREE.MeshBasicMaterial({
   color:0x687f90
@@ -147,18 +150,31 @@ fpsLimitInput.onchange=()=>{
   save('fps-limit',fpsLimit);
   nextRenderAt=0;
 };
+let currentDpr=0;
 function resize() {
+  currentDpr=devicePixelRatio||1;
   const aspect=innerWidth/innerHeight;
   camera.aspect=aspect;
   camera.fov=THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(51.5))/aspect));
   camera.updateProjectionMatrix();
-  renderer.setSize(Math.max(1,Math.floor(innerWidth*renderScale)),Math.max(1,Math.floor(innerHeight*renderScale)),false);
+  renderer.setSize(Math.max(1,Math.floor(innerWidth*currentDpr*renderScale)),Math.max(1,Math.floor(innerHeight*currentDpr*renderScale)),false);
   renderer.domElement.style.width='100vw';
   renderer.domElement.style.height='100vh';
 }
 el.quality.onchange=()=>{
-  renderScale=Number(el.quality.value);
+  renderScale=Number(el.quality.value)||1;
   save('fps-quality',renderScale);
+  resize();
+};
+el.aa.value=antialias?'1':'0';
+el.aa.onchange=()=>{
+  antialias=el.aa.value==='1';
+  save('fps-antialias',antialias?'1':'0');
+  const old=renderer;
+  renderer=createRenderer();
+  old.domElement.replaceWith(renderer.domElement);
+  old.dispose();
+  old.forceContextLoss();
   resize();
 };
 addEventListener('resize',resize);
@@ -502,6 +518,7 @@ function frame(now) {
     const interval=1000/limit;
     nextRenderAt=nextRenderAt>0&&now-nextRenderAt<interval?nextRenderAt+interval:now+interval;
   }else nextRenderAt=0;
+  if((devicePixelRatio||1)!==currentDpr)resize();
   renderer.render(scene,camera);
   frames++;
   if(now-fpsTime>=1000) {
