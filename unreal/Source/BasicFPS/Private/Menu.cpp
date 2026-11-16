@@ -38,6 +38,8 @@ void ABasicFPSController::BuildMenu() {
     auto Add=[&](TSharedRef<SWidget> Widget,float Gap=9) {Column->AddSlot().AutoHeight().Padding(0,0,0,Gap)[Widget];};
     Add(SNew(STextBlock).Text(FText::FromString(TEXT("BASIC FPS · 언리얼 시험판"))).Font(FCoreStyle::GetDefaultFontStyle("Bold",24)));
     Add(Label(TEXT("DX11 · MSAA · Windows 실기 확인이 필요한 시험판이에요.\nWASD 이동 · Shift 걷기 · 왼쪽 클릭 사격 · R 재장전 · Tab 점수판 · Esc 메뉴")));
+    Add(SNew(STextBlock).Text_Lambda([this]{return FText::FromString(FString::Printf(TEXT("%.0f FPS · %s"),FPS,*DiagnosticLine()));})
+        .AutoWrapText(true).Font(FCoreStyle::GetDefaultFontStyle("Regular",13)));
     Add(Label(TEXT("닉네임")),4);
     Add(SNew(SEditableTextBox).Text_Lambda([this]{return FText::FromString(Settings()->Nickname);})
         .IsEnabled_Lambda([this]{return !bDisplayPending;})
