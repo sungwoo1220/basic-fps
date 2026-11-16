@@ -1,6 +1,11 @@
 # Basic FPS Launcher
 
-Windows용 런처와 브라우저(WebGL) 기반 멀티플레이 FPS 게임입니다. 게임은 증분 업데이트되고, 설치 파일은 GitHub Actions가 만듭니다.
+Windows용 런처와 브라우저(WebGL) 기반 멀티플레이 FPS 게임입니다. 기존 게임을 유지하면서 **언리얼 5.6 + DX11 + 포워드/MSAA Windows 시험판**을 준비하고 있습니다. 게임은 증분 업데이트되고, 설치 파일은 GitHub Actions가 만듭니다.
+
+## 언리얼 전환 상태
+언리얼 소스·시험판 업데이트·전용 Windows PC 자동 빌드 절차를 추가했습니다. **Windows 컴파일·실행·독점 전체화면·실제 MSAA 성능은 아직 미검증**입니다. 빌드 PC가 연결되고 검사가 통과하기 전에는 다운로드할 언리얼 시험판이 없습니다. 기존 게임은 계속 사용할 수 있습니다.
+
+빌드 PC 최초 준비와 연결, 시험판 설치, 실제 화면 시험은 [Windows 안내](windows/README.md)를 확인하세요. 새 선택 화면을 사용하려면 이번 변경의 런처 설치 파일을 다시 설치해야 합니다.
 
 ## 처음 설치
 Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설치하세요. 서명 없는 개인용 설치 파일이라 Windows에서 게시자 확인 경고가 나올 수 있으니 출처를 확인하세요.
@@ -17,6 +22,8 @@ Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설�
 - `game/server.js`, `game/launcher.html`, `game/public/`: 게임 서버와 화면. main에 올리면 릴리스로 배포되고 런처가 바뀐 파일만 받습니다.
 - `game/tests/`, `scripts/`: 자동 시험과 보조 스크립트.
 - `publish.cjs`: 릴리스용 업데이트 목록(`update.json`)과 파일 묶음을 만듭니다.
+- `unreal/`: 언리얼 5.6 Windows 시험판 소스·설정·이동 규칙 검사. 맵과 머티리얼은 빌드 PC에서 생성합니다.
+- `native-update.cjs`, `scripts/*unreal*`, `windows/`: 별도 시험판 패키징·검증·복구와 전용 Windows 빌드/시험 절차.
 - `.github/workflows/`: `build.yml`(main 푸시 시 시험 → 설치 파일 → 릴리스), `test.yml`(PR 시험만).
 
 ## 패치 배포
@@ -35,4 +42,4 @@ Node.js 22 + `npm install`.
 - `npm start`: 런처 실행(Electron)
 - `npm run build`: Windows 설치 파일 생성(Windows에서만)
 
-main에 푸시하면 곧바로 릴리스가 만들어지니, 변경은 브랜치와 PR로 올려 `test.yml` 결과를 확인한 뒤 합치는 것을 권장합니다.
+소유자의 요청에 따라 변경은 main에 바로 올립니다. 기존 설치 파일 빌드는 GitHub 제공 PC에서 실행합니다. 언리얼 시험판은 연결된 전용 Windows PC에서 main/수동 실행만 처리하며, 모든 빌드·자동 시험을 통과한 경우에만 별도 prerelease로 게시합니다. 실제 GPU 시험 전에는 기존 게임을 대체하지 않습니다.

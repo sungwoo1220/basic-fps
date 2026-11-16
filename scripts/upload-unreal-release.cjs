@@ -1,0 +1,13 @@
+'use strict';
+const fs=require('fs'),path=require('path'),{execFileSync}=require('child_process');
+const directory=path.resolve(process.argv[2]||'unreal-release');
+const manifest=JSON.parse(fs.readFileSync(path.join(directory,'unreal-update.json'),'utf8'));
+require('../native-update.cjs').validateManifest(manifest);
+const repo='sungwoo1220/basic-fps',tag=manifest.build,sha=process.env.SOURCE_SHA;
+if(!/^[a-f0-9]{40}$/.test(sha||''))throw Error('SOURCE_SHA required');
+const gh=args=>execFileSync('gh',args,{stdio:'inherit'});
+gh(['release','create',tag,'--repo',repo,'--target',sha,'--draft','--prerelease','--title',`Basic FPS Unreal trial ${manifest.version}`,'--notes','Windows self-hosted build and automated tests passed. Interactive fullscreen, GPU performance and MUX behavior still require hardware verification. Existing browser releases are unchanged.']);
+const assets=fs.readdirSync(directory).filter(name=>/^[a-f0-9]{64}\.bin$/.test(name));
+for(let i=0;i<assets.length;i+=20)gh(['release','upload',tag,'--repo',repo,...assets.slice(i,i+20).map(name=>path.join(directory,name))]);
+gh(['release','upload',tag,'--repo',repo,path.join(directory,'unreal-update.json')]);
+gh(['release','edit',tag,'--repo',repo,'--draft=false','--prerelease']);

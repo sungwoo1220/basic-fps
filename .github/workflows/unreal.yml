@@ -1,0 +1,88 @@
+name: Unreal Windows trial (dedicated PC)
+on:
+  push:
+    branches: [main]
+    paths: ['unreal/**', 'windows/**', 'scripts/*unreal*', 'native-update.cjs', 'game/**', 'package.json', '.github/workflows/unreal.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: unreal-trial-main
+  cancel-in-progress: false
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile portable prediction rules (not an Unreal build)
+        run: |
+          node scripts/export-unreal-rules.cjs --check
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 unreal/Tests/SimulationTests.cpp -o "$RUNNER_TEMP/basic-fps-sim-test"
+          "$RUNNER_TEMP/basic-fps-sim-test"
+  build:
+    needs: rules
+    if: github.repository == 'sungwoo1220/basic-fps' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, Windows, X64, basic-fps-unreal]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare JS test dependencies outside source
+        shell: powershell
+        run: |
+          $runtime=Join-Path $env:RUNNER_TEMP 'basic-fps-js-runtime'
+          npm.cmd install --prefix $runtime --no-audit --no-fund --no-save ws@8.18.3 three@0.170.0
+          if ($LASTEXITCODE -ne 0) { throw 'Test dependency installation failed' }
+          "NODE_PATH=$runtime\node_modules" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "NATIVE_OUTPUT=$env:RUNNER_TEMP\basic-fps-ue-${{ github.run_id }}-${{ github.run_attempt }}" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Compile, generate own content, test and package
+        shell: powershell
+        run: ./windows/Build-Unreal.ps1 -OutputRoot $env:NATIVE_OUTPUT
+      - name: Prepare content-addressed trial release
+        shell: powershell
+        env:
+          RELEASE_TAG: ue-test-${{ github.run_number }}-${{ github.run_attempt }}
+        run: |
+          node scripts/publish-unreal.cjs "$env:NATIVE_OUTPUT\Package" "$env:NATIVE_OUTPUT\Release"
+          if ($LASTEXITCODE -ne 0) { throw 'Native package manifest failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unreal-trial
+          path: ${{ env.NATIVE_OUTPUT }}/Release/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Upload diagnostics even if the build failed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal-build-diagnostics
+          path: |
+            ${{ env.NATIVE_OUTPUT }}/*.log
+            ${{ env.NATIVE_OUTPUT }}/*.txt
+            ${{ env.NATIVE_OUTPUT }}/*.json
+            ${{ env.NATIVE_OUTPUT }}/Automation/
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: unreal-trial
+          path: unreal-release
+      - name: Publish only as a prerelease (never replace stable)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: node scripts/upload-unreal-release.cjs unreal-release

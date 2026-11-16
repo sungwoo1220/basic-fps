@@ -109,7 +109,7 @@ async function main(){
   assert(/업데이트 실패/.test(lastStatus()),lastStatus());
   assert.deepEqual(pointer(),installed,'실패한 업데이트가 기존 설치를 바꿨습니다.');
   onlyCurrent();
-  assert.equal(windows[0].sent[windows[0].sent.length-1][1],true,'기존 설치로 계속 실행할 수 있어야 합니다.');
+  assert.equal(windows[0].sent.filter(([channel])=>channel==='ready').at(-1)[1],true,'기존 설치로 계속 실행할 수 있어야 합니다.');
   served=manifest;
   console.log('PASS: launcher failed update — 변조된 파일 거부, 기존 설치 유지, 임시 폴더 삭제.');
 

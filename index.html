@@ -1,1 +1,40 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'"><title>Basic FPS Launcher</title><style>*{box-sizing:border-box}body{margin:0;background:#111c2c;color:#eaf1fa;font:16px Arial,'Malgun Gothic';padding:40px}h1{letter-spacing:3px;color:#80e1cd}p{color:#a9bbce;line-height:1.7}input{width:100%;padding:12px;background:#23334b;border:1px solid #4b6380;color:white;font-size:16px;margin:10px 0}input[type=checkbox]{width:auto}button{padding:13px 18px;border:0;border-radius:5px;background:#80e1cd;color:#112a30;font-weight:bold;margin:8px 4px 8px 0;cursor:pointer}button:disabled{opacity:.4;cursor:default}#status{padding:18px;background:#1d2c42;min-height:90px;overflow-wrap:anywhere}small{color:#a9bbce}</style></head><body><h1>BASIC FPS</h1><p>실행할 때 패치를 확인하고 변경된 게임 파일만 받습니다.</p><label><input type="checkbox" id="host" checked> 내 PC에서 서버 실행</label><input id="address" value="http://127.0.0.1:3000" aria-label="서버 주소"><button id="update">업데이트 확인</button><button id="play" disabled>게임 실행</button><p id="status">런처 준비 중…</p><small>친구 서버에 접속하려면 체크를 해제하고 서버 주소를 입력하세요.<br>외부 접속에는 서버 PC 방화벽 및 TCP 3000 포트 설정이 필요합니다.</small><script src="ui.js"></script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Basic FPS 기존 게임과 언리얼 Windows 시험판을 업데이트하고 실행하는 런처예요.">
+<meta property="og:title" content="Basic FPS 런처">
+<meta property="og:description" content="기존 게임은 그대로, 언리얼 Windows 게임은 별도로 시험해요.">
+<meta name="theme-color" content="#111c2c">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'">
+<title>Basic FPS 런처</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111c2c;color:#eaf1fa;font:16px/1.75 Pretendard,-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',system-ui,sans-serif;word-break:keep-all;padding:30px}main{max-width:670px;margin:auto}h1{font-size:30px;letter-spacing:-.02em;color:#80e1cd;margin:0}p{color:#b5c4d8}label{display:block;margin-top:15px}input,select{width:100%;padding:11px;background:#23334b;border:1px solid #7187a4;color:white;font:inherit;margin-top:7px;border-radius:4px}input[type=checkbox]{width:auto;margin-right:8px}button{padding:12px 17px;border:0;border-radius:5px;background:#80e1cd;color:#112a30;font:inherit;font-weight:700;margin:12px 6px 0 0;cursor:pointer}button.secondary{background:#2a3c55;color:#eaf1fa;border:1px solid #7187a4}button:disabled{opacity:.45;cursor:default}:focus-visible{outline:3px solid #ffcf79;outline-offset:3px}#status{padding:16px;background:#1d2c42;min-height:84px;overflow-wrap:anywhere;border-left:3px solid #80e1cd}small{display:block;color:#b5c4d8;font-size:13px;line-height:1.75}.trial{border-top:1px solid #40546e;margin-top:20px;padding-top:15px}.trial h2{font-size:17px;margin:0}.intro{margin:5px 0 18px}@media(max-width:550px){body{padding:20px}button{width:100%;margin-right:0}}
+</style>
+<style>
+html{color-scheme:dark}button,input,select{touch-action:manipulation;-webkit-tap-highlight-color:#80e1cd44}button:not(:disabled):hover{background:#acf5e7}button.secondary:not(:disabled):hover{background:#405675}.skip{position:fixed;left:16px;top:-80px;background:#80e1cd;color:#112a30;padding:10px;z-index:10}.skip:focus{top:10px}.field-error{color:#ffb6ab;font-size:14px;margin:6px 0}h1,h2{text-wrap:balance}
+</style>
+</head>
+<body><a class="skip" href="#main">게임 실행으로 바로가기</a><main id="main">
+<h1>BASIC FPS</h1>
+<p class="intro">기존 게임은 그대로, 새 Windows 게임은 별도로 시험해요.</p>
+<label for="client">실행할 게임</label>
+<select id="client" name="client" autocomplete="off"><option value="browser">기존 게임</option><option value="unreal">언리얼 Windows 시험판 · DX11 / MSAA</option></select>
+<label><input type="checkbox" id="host" name="host" checked>내 PC에서 방 열기</label>
+<label for="address">접속할 서버 주소</label>
+<input id="address" name="address" type="url" inputmode="url" maxlength="2048" autocomplete="off" value="http://127.0.0.1:3000" spellcheck="false" aria-describedby="addressHint addressError">
+<small id="addressHint">친구가 연 방에 접속하려면 ‘내 PC에서 방 열기’를 해제해 주세요.</small>
+<p id="addressError" class="field-error" role="alert" hidden></p>
+<button id="play" disabled>선택한 게임 실행</button>
+<button id="update" class="secondary">기존 게임 업데이트</button>
+<section class="trial" aria-labelledby="trialTitle">
+<h2 id="trialTitle">언리얼 Windows 시험판</h2>
+<small id="nativeStatus">설치 상태를 확인하고 있어요…</small>
+<button id="nativeUpdate" class="secondary">언리얼 시험판 다운로드 / 업데이트</button>
+<small>Windows 빌드 성공 전에는 다운로드할 시험판이 없어요. 기존 게임은 계속 사용할 수 있어요.</small>
+</section>
+<p id="status" role="status" aria-live="polite">런처 준비 중…</p>
+<small>방을 외부에 열려면 방을 연 PC의 방화벽과 TCP 3000 포트 설정이 필요해요.<br>언리얼 시험판은 별도 게임 실행 파일을 사용해요. 최초 실행에는 Windows 필수 구성 요소 설치가 필요할 수 있어요.</small>
+</main><script src="ui.js"></script></body>
+</html>

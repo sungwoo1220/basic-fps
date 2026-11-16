@@ -1,0 +1,14 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.6",
+  "Category": "Games",
+  "Description": "Basic FPS Windows trial client. Existing browser client remains available.",
+  "Modules": [
+    { "Name": "BasicFPS", "Type": "Runtime", "LoadingPhase": "Default" },
+    { "Name": "BasicFPSEditor", "Type": "Editor", "LoadingPhase": "Default" }
+  ],
+  "Plugins": [
+    { "Name": "OnlineSubsystem", "Enabled": false },
+    { "Name": "OnlineSubsystemNull", "Enabled": false }
+  ]
+}

@@ -2,3 +2,14 @@ node_modules/
 dist/
 patch/
 game/public/three.module.js
+unreal/.vs/
+unreal/Binaries/
+unreal/Intermediate/
+unreal/Saved/
+unreal/DerivedDataCache/
+unreal/Content/
+unreal/*.sln
+unreal/*.slnx
+unreal/BuildOutput/
+windows/local-build.json
+.baze-files/outputs/build-logs/

@@ -7,7 +7,7 @@
     "start": "electron .",
     "game": "node scripts/copy-three.cjs && node game/server.js",
     "pretest": "node scripts/copy-three.cjs",
-    "test": "node --check main.cjs && node --check game/server.js && node --check game/public/shared.js && node --input-type=module --check < game/public/game.js && node game/tests/regression.cjs && node game/tests/server.cjs && node game/tests/launcher.cjs",
+    "test": "node --check main.cjs && node --check native-update.cjs && node --check ui.js && node --check preload.cjs && node --check scripts/publish-unreal.cjs && node --check scripts/upload-unreal-release.cjs && node --check game/server.js && node --check game/public/shared.js && node --input-type=module --check < game/public/game.js && node scripts/export-unreal-rules.cjs --check && node game/tests/regression.cjs && node game/tests/server.cjs && node game/tests/launcher.cjs && node game/tests/native-update.cjs && node game/tests/native-launcher.cjs",
     "build": "electron-builder --win nsis"
   },
   "dependencies": {
@@ -26,6 +26,7 @@
     },
     "files": [
       "main.cjs",
+      "native-update.cjs",
       "preload.cjs",
       "index.html",
       "ui.js",
