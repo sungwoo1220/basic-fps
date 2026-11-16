@@ -35,7 +35,7 @@ ${scenarios.join(',\n')}
 }
 `;
 if(process.argv.includes('--check')){
-  if(!fs.existsSync(output)||fs.readFileSync(output,'utf8')!==text)throw Error('Unreal rules are stale. Run node scripts/export-unreal-rules.cjs.');
+  if(!fs.existsSync(output)||fs.readFileSync(output,'utf8').replace(/\r\n/g,'\n')!==text)throw Error('Unreal rules are stale. Run node scripts/export-unreal-rules.cjs.');
 }else{
   fs.mkdirSync(path.dirname(output),{recursive:true});
   fs.writeFileSync(output,text);
