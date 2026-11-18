@@ -13,6 +13,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: '.node-version'
+      - name: Check toolchain version rules (not a Windows or Unreal build)
+        shell: pwsh
+        run: ./windows/Test-Toolchain.ps1
       - run: npm install
       - run: npm test

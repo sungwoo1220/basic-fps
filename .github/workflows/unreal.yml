@@ -2,7 +2,7 @@ name: Unreal Windows trial (dedicated PC)
 on:
   push:
     branches: [main]
-    paths: ['unreal/**', 'windows/**', 'scripts/*unreal*', 'native-update.cjs', 'game/**', 'package.json', '.github/workflows/unreal.yml']
+    paths: ['unreal/**', 'windows/**', 'scripts/*unreal*', 'native-update.cjs', 'game/**', 'package.json', '.node-version', '.github/workflows/unreal.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,6 +16,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
       - name: Compile portable prediction rules (not an Unreal build)
         run: |
           node scripts/export-unreal-rules.cjs --check
@@ -32,7 +35,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version-file: '.node-version'
+      - name: Check Windows toolchain scripts (not an Unreal build)
+        shell: powershell
+        run: ./windows/Test-Toolchain.ps1
       - name: Prepare JS test dependencies outside source
         shell: powershell
         run: |
@@ -81,6 +87,9 @@ jobs:
         with:
           name: unreal-trial
           path: unreal-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
       - name: Publish only as a prerelease (never replace stable)
         env:
           GH_TOKEN: ${{ github.token }}
