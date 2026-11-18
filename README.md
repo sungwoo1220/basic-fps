@@ -1,11 +1,11 @@
 # Basic FPS Launcher
 
-Windows용 런처와 브라우저(WebGL) 기반 멀티플레이 FPS 게임입니다. 기존 게임을 유지하면서 **언리얼 5.6 + DX11 + 포워드/MSAA Windows 시험판**을 준비하고 있습니다. 게임은 증분 업데이트되고, 설치 파일은 GitHub Actions가 만듭니다.
+Windows용 런처와 브라우저(WebGL) 기반 멀티플레이 FPS 게임입니다. 기존 게임을 유지하면서 **언리얼 5.8.4 + DX11 + 포워드/MSAA Windows 시험판**을 준비하고 있습니다. 게임은 증분 업데이트되고, 설치 파일은 GitHub Actions가 만듭니다.
 
 ## 언리얼 전환 상태
-언리얼 소스·시험판 업데이트·전용 Windows PC 자동 빌드 절차를 추가했습니다. **Windows 컴파일·실행·독점 전체화면·실제 MSAA 성능은 아직 미검증**입니다. 빌드 PC가 연결되고 검사가 통과하기 전에는 다운로드할 언리얼 시험판이 없습니다. 기존 게임은 계속 사용할 수 있습니다.
+언리얼 소스·시험판 업데이트·Windows 빌드 절차를 추가했습니다. **Windows 컴파일·실행·독점 전체화면·실제 MSAA 성능은 아직 미검증**입니다. 노트북에서 자동 연결 없이 직접 빌드·시험할 수 있도록 안내와 사전 검사를 준비했습니다. 별도 시험판이 게시되기 전에는 런처로 다운로드할 언리얼 게임이 없습니다. 기존 게임은 계속 사용할 수 있습니다.
 
-빌드 PC 최초 준비와 연결, 시험판 설치, 실제 화면 시험은 [Windows 안내](windows/README.md)를 확인하세요. 새 선택 화면을 사용하려면 이번 변경의 런처 설치 파일을 다시 설치해야 합니다.
+노트북 도구 설치 → 직접 빌드 → 실제 화면 시험 순서는 [Windows 안내](windows/README.md)를 확인하세요. GitHub runner 연결은 선택 사항입니다. 도구 기준은 UE 5.8.4, Visual Studio 2026 정식판, 호환되는 MSVC 14.50, Windows SDK 26100 이상, Node.js 26 LTS입니다. 새 런처 선택 화면을 사용하려면 런처 설치 파일을 다시 설치해야 하지만, 직접 만든 언리얼 게임은 런처 없이도 실행할 수 있습니다.
 
 ## 처음 설치
 Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설치하세요. 서명 없는 개인용 설치 파일이라 Windows에서 게시자 확인 경고가 나올 수 있으니 출처를 확인하세요.
@@ -22,7 +22,7 @@ Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설�
 - `game/server.js`, `game/launcher.html`, `game/public/`: 게임 서버와 화면. main에 올리면 릴리스로 배포되고 런처가 바뀐 파일만 받습니다.
 - `game/tests/`, `scripts/`: 자동 시험과 보조 스크립트.
 - `publish.cjs`: 릴리스용 업데이트 목록(`update.json`)과 파일 묶음을 만듭니다.
-- `unreal/`: 언리얼 5.6 Windows 시험판 소스·설정·이동 규칙 검사. 맵과 머티리얼은 빌드 PC에서 생성합니다.
+- `unreal/`: 언리얼 5.8.4 Windows 시험판 소스·설정·이동 규칙 검사. 맵과 머티리얼은 빌드할 PC에서 생성합니다.
 - `native-update.cjs`, `scripts/*unreal*`, `windows/`: 별도 시험판 패키징·검증·복구와 전용 Windows 빌드/시험 절차.
 - `.github/workflows/`: `build.yml`(main 푸시 시 시험 → 설치 파일 → 릴리스), `test.yml`(PR 시험만).
 
@@ -36,10 +36,11 @@ Releases의 최신 릴리스에서 `Basic-FPS-Launcher-Setup.exe`를 받아 설�
 - 토큰/비밀번호를 게임이나 공개 저장소에 넣지 마세요.
 
 ## 개발
-Node.js 22 + `npm install`.
+Node.js 26.13.1 LTS(`.node-version`) + `npm install`. 최신 26.x 정식 패치도 지원하며 Alpha는 사용하지 않습니다. 기존 런처 부품과 브라우저 렌더러 버전은 이번 언리얼 도구 전환에서 변경하지 않았습니다.
 - `npm test`: 문법 검사, 이동·판정 시험, 서버 탄창/재장전 시험, 런처 업데이트·실행 시험
 - `npm run game`: 게임 서버만 로컬에서 실행(http://localhost:3000). Three.js 파일은 자동으로 복사됩니다.
 - `npm start`: 런처 실행(Electron)
 - `npm run build`: Windows 설치 파일 생성(Windows에서만)
+- `windows/Test-Toolchain.ps1`: 빌드 도구 버전 선택·설정 일치·PowerShell 문법 검사. 실제 UE 컴파일 검사가 아닙니다.
 
 소유자의 요청에 따라 변경은 main에 바로 올립니다. 기존 설치 파일 빌드는 GitHub 제공 PC에서 실행합니다. 언리얼 시험판은 연결된 전용 Windows PC에서 main/수동 실행만 처리하며, 모든 빌드·자동 시험을 통과한 경우에만 별도 prerelease로 게시합니다. 실제 GPU 시험 전에는 기존 게임을 대체하지 않습니다.
