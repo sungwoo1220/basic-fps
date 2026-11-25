@@ -1,0 +1,6 @@
+{
+  "name": "basic-fps",
+  "main": "worker-site/index.js",
+  "compatibility_date": "2025-11-02",
+  "assets": { "directory": "./site", "not_found_handling": "404-page" }
+}
