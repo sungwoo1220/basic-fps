@@ -2,5 +2,6 @@
   "name": "basic-fps",
   "main": "worker-site/index.js",
   "compatibility_date": "2025-11-02",
-  "assets": { "directory": "./site", "not_found_handling": "404-page" }
+  "assets": { "directory": "./site", "not_found_handling": "404-page", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "local", "database_id": "local" }]
 }

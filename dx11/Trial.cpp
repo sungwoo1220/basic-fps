@@ -1,3 +1,4 @@
+#include "Lobby.h"
 #include "Network.h"
 #include "Room.h"
 #include "Renderer.h"
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <memory>
 #include <stdexcept>
+#include <thread>
 
 namespace Trial {
 namespace {
@@ -19,12 +21,12 @@ double Now() { return std::chrono::duration<double>(Clock::now().time_since_epoc
 constexpr DWORD WindowStyle=WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN;
 constexpr wchar_t ClassName[]=L"BasicFPS.DX11.Trial";
 constexpr int Limits[]={60,144,240,300,0};
-constexpr Rect Host{66,317,438,357}, Resume{66,365,438,405}, Connect{66,413,438,453}, Exit{66,461,438,501};
+constexpr Rect Host{66,317,438,353}, Rooms{66,361,438,397}, Resume{66,405,438,441}, Connect{66,449,438,485}, Exit{66,493,438,529};
 constexpr Rect Mode{588,185,930,221}, Samples{588,229,930,265}, Filtering{588,273,930,309}, Limit{588,317,930,353};
 constexpr Rect Slower{588,361,640,397}, Sensitivity{648,361,872,397}, Faster{880,361,930,397}, Bots{588,405,930,441};
 constexpr Rect Keep{269,334,488,382}, Undo{512,334,731,382};
-constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Slower,Sensitivity,Faster,Filtering,Bots};
-constexpr int FilteringButton=10, BotsButton=11;
+constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Slower,Sensitivity,Faster,Filtering,Rooms,Bots};
+constexpr int FilteringButton=10, RoomsButton=11, BotsButton=12;
 // Same scale as the browser game (Valorant: 0.07 degrees per mouse count times sensitivity).
 constexpr double RadiansPerCount=Pi/180*.07;
 enum class Display { Windowed, Borderless, Exclusive };
@@ -35,7 +37,15 @@ const wchar_t* Name(Display mode) {
     default: return L"독점 전체화면";
     }
 }
-struct ConnectForm { std::wstring address=L"http://127.0.0.1:3000", nick=L"Player"; };
+struct ConnectForm { std::wstring address=L"http://127.0.0.1:3000", nick=L"Player"; bool listed=true; };
+std::wstring ReadNick(HWND window) {
+    wchar_t text[17]{};
+    GetDlgItemTextW(window,ID_NICKNAME,text,static_cast<int>(std::size(text)));
+    std::wstring nick=text;
+    if(nick.empty()) nick=L"Player";
+    if(nick.back()>=0xd800 && nick.back()<=0xdbff) nick.pop_back();
+    return nick;
+}
 INT_PTR CALLBACK ConnectDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
     if(msg==WM_INITDIALOG) {
         auto* form=reinterpret_cast<ConnectForm*>(l);
@@ -44,24 +54,83 @@ INT_PTR CALLBACK ConnectDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
         SendDlgItemMessageW(window,ID_NICKNAME,EM_SETLIMITTEXT,16,0);
         if(GetDlgItem(window,ID_ADDRESS)) SetDlgItemTextW(window,ID_ADDRESS,form->address.c_str());
         SetDlgItemTextW(window,ID_NICKNAME,form->nick.c_str());
+        if(GetDlgItem(window,ID_LISTED)) CheckDlgButton(window,ID_LISTED,form->listed?BST_CHECKED:BST_UNCHECKED);
         return TRUE;
     }
     if(msg!=WM_COMMAND) return FALSE;
     if(LOWORD(w)==IDOK) {
         auto* form=reinterpret_cast<ConnectForm*>(GetWindowLongPtrW(window,DWLP_USER));
-        wchar_t address[2049]{},nick[17]{};
+        wchar_t address[2049]{};
         if(GetDlgItem(window,ID_ADDRESS)) {
             GetDlgItemTextW(window,ID_ADDRESS,address,static_cast<int>(std::size(address)));
             form->address=address;
         }
-        GetDlgItemTextW(window,ID_NICKNAME,nick,static_cast<int>(std::size(nick)));
-        form->nick=nick;
-        if(form->nick.empty()) form->nick=L"Player";
-        if(form->nick.back()>=0xd800 && form->nick.back()<=0xdbff) form->nick.pop_back();
+        form->nick=ReadNick(window);
+        if(GetDlgItem(window,ID_LISTED)) form->listed=IsDlgButtonChecked(window,ID_LISTED)==BST_CHECKED;
         EndDialog(window,IDOK); return TRUE;
     }
     if(LOWORD(w)==IDCANCEL) { EndDialog(window,IDCANCEL); return TRUE; }
     return FALSE;
+}
+
+constexpr UINT RoomsLoaded=WM_APP+1;
+struct RoomsForm { ConnectForm* form=nullptr; std::vector<LobbyRoom> rooms; };
+struct RoomsReply { std::vector<LobbyRoom> rooms; std::wstring error; bool ok=false; };
+void LoadRooms(HWND window) {
+    EnableWindow(GetDlgItem(window,ID_REFRESH),FALSE);
+    SetDlgItemTextW(window,ID_ROOMNOTE,L"방 목록을 불러오는 중이에요…");
+    std::thread([window] {
+        auto* reply=new RoomsReply;
+        reply->ok=FetchRooms(reply->rooms,reply->error);
+        if(!PostMessageW(window,RoomsLoaded,0,reinterpret_cast<LPARAM>(reply))) delete reply;
+    }).detach();
+}
+std::wstring RoomLine(const LobbyRoom& room) {
+    const wchar_t* tag=room.sameNetwork?L"같은 공유기":(room.reachable?L"인터넷 접속 가능":L"같은 공유기만");
+    return room.name+L"   ·   "+std::to_wstring(room.players)+L"/"+std::to_wstring(room.max)+L"명   ·   "+tag;
+}
+INT_PTR CALLBACK RoomsDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
+    auto* form=reinterpret_cast<RoomsForm*>(GetWindowLongPtrW(window,DWLP_USER));
+    if(msg==WM_INITDIALOG) {
+        SetWindowLongPtrW(window,DWLP_USER,l);
+        form=reinterpret_cast<RoomsForm*>(l);
+        SendDlgItemMessageW(window,ID_NICKNAME,EM_SETLIMITTEXT,16,0);
+        SetDlgItemTextW(window,ID_NICKNAME,form->form->nick.c_str());
+        EnableWindow(GetDlgItem(window,IDOK),FALSE);
+        LoadRooms(window);
+        return TRUE;
+    }
+    if(!form) return FALSE;
+    if(msg==RoomsLoaded) {
+        const std::unique_ptr<RoomsReply> reply(reinterpret_cast<RoomsReply*>(l));
+        form->rooms=std::move(reply->rooms);
+        const HWND list=GetDlgItem(window,ID_ROOMLIST);
+        SendMessageW(list,LB_RESETCONTENT,0,0);
+        for(const auto& room:form->rooms) SendMessageW(list,LB_INSERTSTRING,static_cast<WPARAM>(-1),reinterpret_cast<LPARAM>(RoomLine(room).c_str()));
+        if(!form->rooms.empty()) SendMessageW(list,LB_SETCURSEL,0,0);
+        const std::wstring note=!reply->ok?reply->error:(form->rooms.empty()?L"지금 열린 방이 없어요. 방 만들기로 직접 열어 보세요.":
+            L"방을 고르고 들어가기를 누르세요. ‘같은 공유기만’ 방은 방장과 같은 공유기에서만 들어갈 수 있어요.");
+        SetDlgItemTextW(window,ID_ROOMNOTE,note.c_str());
+        EnableWindow(GetDlgItem(window,IDOK),!form->rooms.empty());
+        EnableWindow(GetDlgItem(window,ID_REFRESH),TRUE);
+        return TRUE;
+    }
+    if(msg!=WM_COMMAND) return FALSE;
+    switch(LOWORD(w)) {
+    case ID_REFRESH: LoadRooms(window); return TRUE;
+    case ID_ROOMLIST:
+        if(HIWORD(w)==LBN_DBLCLK) PostMessageW(window,WM_COMMAND,IDOK,0);
+        return TRUE;
+    case IDOK: {
+        const auto pick=SendDlgItemMessageW(window,ID_ROOMLIST,LB_GETCURSEL,0,0);
+        if(pick<0 || static_cast<size_t>(pick)>=form->rooms.size()) return TRUE;
+        form->form->nick=ReadNick(window);
+        form->form->address=form->rooms[static_cast<size_t>(pick)].join();
+        EndDialog(window,IDOK); return TRUE;
+    }
+    case IDCANCEL: EndDialog(window,IDCANCEL); return TRUE;
+    default: return FALSE;
+    }
 }
 
 std::wstring Fixed(double value) {
@@ -189,7 +258,7 @@ private:
     HMONITOR monitor_=nullptr;
     RECT windowed_{};
     bool active_=true, menu_=true, clipped_=false, closing_=false, wasConnected_=false, fire_=false, reload_=false;
-    bool pendingDisplay_=false, needsRevert_=false, hosted_=false, joinPending_=false;
+    bool pendingDisplay_=false, needsRevert_=false, hosted_=false, joinPending_=false, fromList_=false;
     Display display_=Display::Windowed, previous_=Display::Windowed;
     double deadline_=0, connectDeadline_=0, yaw_=0, pitch_=0;
     int limit_=3, fps_=0, focus_=-1;
@@ -199,6 +268,7 @@ private:
     ConnectForm form_;
     Game game_;
     Room room_;
+    Lobby lobby_;
     Network network_;
     std::wstring lan_;
     std::unique_ptr<Renderer> gfx_;
@@ -244,8 +314,8 @@ private:
     void showMenu(bool on) {
         menu_=on; focus_=-1; fire_=reload_=false; keys_.fill(false); updateMouse();
     }
-    void connect() {
-        note_.clear(); game_=Game{}; wasConnected_=false;
+    void connect(bool fromList=false) {
+        note_.clear(); game_=Game{}; wasConnected_=false; fromList_=fromList;
         if(network_.start(form_.address,form_.nick)) connectDeadline_=Now()+12;
     }
     bool localRoom() const {
@@ -258,26 +328,30 @@ private:
     void host() {
         if(room_.running()) {
             if(hosted_ && form_.address==room_.local()) network_.stop();
-            joinPending_=hosted_=false; room_.stop(); game_=Game{}; note_=L"방을 닫았어요."; return;
+            joinPending_=hosted_=false; lobby_.stop(); room_.stop(); game_=Game{}; note_=L"방을 닫았어요."; return;
         }
         if(display_==Display::Exclusive) { note_=L"방을 만들려면 먼저 창모드로 바꿔 주세요."; return; }
         if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_HOST),hwnd_,ConnectDialog,reinterpret_cast<LPARAM>(&form_))!=IDOK) return;
         std::wstring error;
         if(!room_.start(error)) { note_=error; return; }
         form_.address=room_.local(); lan_=room_.lan();
+        if(form_.listed) lobby_.start(form_.nick,room_.port(),room_.lanIp(),lan_);
         hosted_=joinPending_=true; network_.stop(); game_=Game{}; note_=L"방을 여는 중이에요…";
     }
     void tick(double now,double dt,double& due) {
         if(hosted_ && !room_.running()) {
-            joinPending_=hosted_=false; network_.stop(); note_=L"방이 종료됐어요. 다시 만들 수 있어요.";
+            joinPending_=hosted_=false; lobby_.stop(); network_.stop(); note_=L"방이 종료됐어요. 다시 만들 수 있어요.";
         }
         if(joinPending_ && !network_.busy()) {
             joinPending_=false; note_.clear(); game_=Game{}; wasConnected_=false;
+            fromList_=false;
             if(network_.start(form_.address,form_.nick,10000)) connectDeadline_=Now()+14;
         }
+        if(hosted_) lobby_.players(static_cast<int>(game_.players.size())-botCount());
         for(const auto& packet:network_.drain()) game_.receive(packet,now);
         if(game_.own()) { wasConnected_=true; connectDeadline_=0; }
-        if(connectDeadline_ && now>connectDeadline_ && network_.busy()) { network_.stop(); connectDeadline_=0; note_=L"방 응답 시간이 초과됐어요."; }
+        if(connectDeadline_ && now>connectDeadline_ && network_.busy()) { network_.stop(); connectDeadline_=0;
+            note_=fromList_?L"방에 들어가지 못했어요. 방장 PC의 방화벽 허용과 공유기 포트를 확인해 달라고 해 주세요.":L"방 응답 시간이 초과됐어요."; }
         if(wasConnected_ && !network_.busy()) { wasConnected_=false; game_=Game{}; showMenu(true); }
         if(pendingDisplay_ && (needsRevert_ || now>=deadline_ || (display_==Display::Exclusive && !gfx_->exclusive()))) confirm(false);
         if(!pendingDisplay_ && display_==Display::Exclusive && !gfx_->exclusive()) {
@@ -372,6 +446,13 @@ private:
         case FilteringButton: {
             const UINT next=gfx_->anisotropy()>=16?1:gfx_->anisotropy()*2;
             if(!gfx_->setAnisotropy(next)) note_=L"이방성 필터링을 적용하지 못했어요.";
+            break;
+        }
+        case RoomsButton: {
+            if(network_.busy()) { note_=L"방 목록에서 들어가려면 먼저 지금 방에서 나와 주세요."; break; }
+            if(display_==Display::Exclusive) { note_=L"방 목록을 보려면 먼저 창모드로 바꿔 주세요."; break; }
+            RoomsForm rooms; rooms.form=&form_;
+            if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_ROOMS),hwnd_,RoomsDialog,reinterpret_cast<LPARAM>(&rooms))==IDOK) connect(true);
             break;
         }
         case BotsButton:
@@ -475,10 +556,27 @@ private:
         gfx_->label({67,145,435,179},L"DX11 Windows 시험판",21,Aqua,true);
         gfx_->label({67,195,438,222},std::to_wstring(fps_)+L" FPS   /   "+gfx_->gpu,14,Chalk);
         gfx_->line(66,236,430,236,0x40566a);
-        gfx_->label({67,246,437,271},player?(hosted_&&localRoom()?L"내 방에 들어왔어요.":L"방에 연결됐어요."):L"방 만들기 또는 연결",16,Chalk,true);
-        const auto status=!note_.empty()?note_:(!game_.error.empty()?ToWide(game_.error):(player?(hosted_&&localRoom()?L"친구 접속 주소  "+(lan_.empty()?form_.address:lan_):form_.address):network_.status()));
-        gfx_->label({67,275,437,307},status.empty()?L"방을 만들면 바로 들어가요. 친구 방에도 연결할 수 있어요.":status,14,Muted);
+        const bool mine=player && hosted_ && localRoom();
+        const auto listing=lobby_.state();
+        std::wstring title=player?L"방에 연결됐어요.":L"방 만들기 또는 연결", where=player?form_.address:network_.status();
+        if(mine) {
+            const auto lanText=L"같은 공유기 주소  "+(lan_.empty()?form_.address:lan_);
+            switch(listing.phase) {
+            case Lobby::Phase::Off: title=L"내 방 · 목록에 안 올림"; where=lanText; break;
+            case Lobby::Phase::Listing: title=L"내 방 · 목록에 올리는 중"; where=lanText; break;
+            case Lobby::Phase::Failed: title=L"내 방 · 목록에 올리지 못함"; where=lanText; break;
+            case Lobby::Phase::Listed:
+                title=listing.reachable?L"내 방 · 인터넷에서 접속 가능":L"내 방 · 같은 공유기에서만 접속 가능";
+                where=listing.reachable?L"방 목록에 올렸어요  "+listing.address:
+                    L"공유기에서 TCP "+std::to_wstring(room_.port())+L" 포트를 이 PC로 열면 인터넷 친구도 들어와요.";
+                break;
+            }
+        }
+        gfx_->label({67,246,437,271},title,16,Chalk,true);
+        const auto status=!note_.empty()?note_:(!game_.error.empty()?ToWide(game_.error):where);
+        gfx_->label({67,275,437,307},status.empty()?L"방을 만들면 목록에 올라가요. 방 목록에서 친구 방에 들어갈 수 있어요.":status,14,Muted);
         button(Host,room_.running()?L"내 방 닫기":L"방 만들기",0,true,!player);
+        button(Rooms,L"방 목록",RoomsButton,!network_.busy());
         button(Resume,L"계속하기",1,player!=nullptr,player!=nullptr);
         button(Connect,network_.busy()?L"연결 끊기":L"다른 방에 연결",2);
         button(Exit,L"종료",3);

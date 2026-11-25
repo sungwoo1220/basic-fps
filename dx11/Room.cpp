@@ -116,9 +116,28 @@ bool Room::start(std::wstring& error) {
     return true;
 }
 std::wstring Room::lan() const {
+    const auto ip=lanIp();
+    return ip.empty()?std::wstring{}:L"http://"+ip+L":"+std::to_wstring(port_);
+}
+std::wstring Room::lanIp() const {
     const Winsock ws;
+    if(!ws.ok) return {};
+    // The adapter Windows would use for the internet; a UDP connect sends nothing.
+    if(const SOCKET probe=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);probe!=INVALID_SOCKET) {
+        sockaddr_in out{}; out.sin_family=AF_INET; out.sin_port=htons(53);
+        InetPtonW(AF_INET,L"8.8.8.8",&out.sin_addr);
+        sockaddr_in self{}; int size=sizeof self;
+        std::wstring found;
+        if(connect(probe,reinterpret_cast<sockaddr*>(&out),sizeof out)==0 && getsockname(probe,reinterpret_cast<sockaddr*>(&self),&size)==0) {
+            const auto first=self.sin_addr.S_un.S_un_b.s_b1;
+            wchar_t text[INET_ADDRSTRLEN]{};
+            if(first!=0 && first!=127 && InetNtopW(AF_INET,&self.sin_addr,text,INET_ADDRSTRLEN)) found=text;
+        }
+        closesocket(probe);
+        if(!found.empty()) return found;
+    }
     char name[256]{};
-    if(!ws.ok || gethostname(name,sizeof name)!=0) return {};
+    if(gethostname(name,sizeof name)!=0) return {};
     addrinfo hints{}, *found=nullptr;
     hints.ai_family=AF_INET; hints.ai_socktype=SOCK_STREAM;
     if(getaddrinfo(name,nullptr,&hints,&found)!=0) return {};
@@ -128,7 +147,7 @@ std::wstring Room::lan() const {
         const auto first=v4->sin_addr.S_un.S_un_b.s_b1, second=v4->sin_addr.S_un.S_un_b.s_b2;
         if(first==127 || (first==169 && second==254)) continue;
         wchar_t text[INET_ADDRSTRLEN]{};
-        if(InetNtopW(AF_INET,&v4->sin_addr,text,INET_ADDRSTRLEN)) result=L"http://"+std::wstring(text)+L":"+std::to_wstring(port_);
+        if(InetNtopW(AF_INET,&v4->sin_addr,text,INET_ADDRSTRLEN)) result=text;
     }
     freeaddrinfo(found);
     return result;

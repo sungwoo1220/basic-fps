@@ -4,3 +4,8 @@
 #define ID_NICKNAME 1002
 #define ID_SENS 103
 #define ID_SENSVALUE 1003
+#define ID_ROOMS 104
+#define ID_ROOMLIST 1004
+#define ID_REFRESH 1005
+#define ID_ROOMNOTE 1006
+#define ID_LISTED 1007

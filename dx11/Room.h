@@ -16,6 +16,7 @@ public:
     int port() const { return port_; }
     std::wstring local() const { return L"http://127.0.0.1:"+std::to_wstring(port_); }
     std::wstring lan() const;
+    std::wstring lanIp() const;
 private:
     HANDLE job_=nullptr, process_=nullptr;
     int port_=0;

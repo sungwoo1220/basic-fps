@@ -1,0 +1,17 @@
+CREATE TABLE IF NOT EXISTS rooms (
+  id TEXT PRIMARY KEY,
+  token_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  host TEXT NOT NULL,
+  ip TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  lan TEXT NOT NULL DEFAULT '',
+  players INTEGER NOT NULL DEFAULT 1,
+  upnp INTEGER NOT NULL DEFAULT 0,
+  reachable INTEGER NOT NULL DEFAULT 0,
+  checked_at INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rooms_updated ON rooms (updated_at);
+CREATE INDEX IF NOT EXISTS rooms_ip ON rooms (ip);
