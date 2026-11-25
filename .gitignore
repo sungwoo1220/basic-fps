@@ -12,4 +12,5 @@ unreal/*.sln
 unreal/*.slnx
 unreal/BuildOutput/
 windows/local-build.json
+dx11/build/
 .baze-files/outputs/build-logs/
