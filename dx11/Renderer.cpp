@@ -1,6 +1,7 @@
 #include "Renderer.h"
 #include <d3dcompiler.h>
 #include <d2d1_1helper.h>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,12 +20,16 @@ float Channel(unsigned color,unsigned shift) { return static_cast<float>((color>
 D2D1_COLOR_F Color(unsigned value,float alpha) { return D2D1::ColorF(Channel(value,16),Channel(value,8),Channel(value,0),alpha); }
 constexpr char Shader[]=R"(
 cbuffer Camera : register(b0) { row_major float4x4 vp; };
-struct V { float3 position : POSITION; float3 color : COLOR; };
-struct P { float4 pos : SV_POSITION; float3 color : COLOR; float dist : TEXCOORD; };
-P VS(V v) { P o; o.pos=mul(float4(v.position,1),vp); o.color=v.color; o.dist=o.pos.w; return o; }
+Texture2D surfaceTexture : register(t0);
+SamplerState surfaceSampler : register(s0);
+struct V { float3 position : POSITION; float3 color : COLOR; float3 uvw : TEXCOORD0; };
+struct P { float4 pos : SV_POSITION; float3 color : COLOR; float3 uvw : TEXCOORD0; float dist : TEXCOORD1; };
+P VS(V v) { P o; o.pos=mul(float4(v.position,1),vp); o.color=v.color; o.uvw=v.uvw; o.dist=o.pos.w; return o; }
 float4 PS(P p) : SV_TARGET {
+    float grain=surfaceTexture.Sample(surfaceSampler,p.uvw.xy).r;
+    float3 color=p.color*lerp(1,.75+.5*grain,p.uvw.z);
     float haze=saturate((p.dist-12)/68);
-    return float4(lerp(p.color,float3(.19,.27,.34),haze*.67),1);
+    return float4(lerp(color,float3(.19,.27,.34),haze*.67),1);
 })";
 }
 
@@ -60,7 +65,9 @@ Renderer::Renderer(HWND hwnd,bool software):hwnd_(hwnd) {
     Check(overlayDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE,&overlay_),"Direct2D context");
     Check(overlay_->CreateSolidColorBrush(Color(Chalk,1),&brush_),"Direct2D brush");
     Check(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),reinterpret_cast<IUnknown**>(fonts_.GetAddressOf())),"DirectWrite");
-    makePipeline(); makeArena(); resize();
+    makePipeline(); makeArena(); makeSurface();
+    if(!setAnisotropy(16)) Check(E_FAIL,"Texture sampler");
+    resize();
 }
 Renderer::~Renderer() { if(swap_ && exclusive()) swap_->SetFullscreenState(FALSE,nullptr); }
 bool Renderer::exclusive() const {
@@ -152,9 +159,10 @@ void Renderer::makePipeline() {
     Check(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_),"Pixel shader");
     const D3D11_INPUT_ELEMENT_DESC input[]={
         {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
-        {"COLOR",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0}
+        {"COLOR",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
+        {"TEXCOORD",0,DXGI_FORMAT_R32G32B32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0}
     };
-    Check(device_->CreateInputLayout(input,2,vs->GetBufferPointer(),vs->GetBufferSize(),&layout_),"Vertex layout");
+    Check(device_->CreateInputLayout(input,3,vs->GetBufferPointer(),vs->GetBufferSize(),&layout_),"Vertex layout");
     D3D11_BUFFER_DESC matrix{};
     matrix.ByteWidth=sizeof(XMFLOAT4X4); matrix.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     Check(device_->CreateBuffer(&matrix,nullptr,&camera_),"Camera buffer");
@@ -166,7 +174,7 @@ void Renderer::makePipeline() {
     raster.FillMode=D3D11_FILL_SOLID; raster.CullMode=D3D11_CULL_NONE; raster.DepthClipEnable=TRUE; raster.MultisampleEnable=TRUE;
     Check(device_->CreateRasterizerState(&raster,&raster_),"Rasterizer");
 }
-void Renderer::box(std::vector<Vertex>& dst,float x,float y,float z,float w,float h,float d,unsigned color) {
+void Renderer::box(std::vector<Vertex>& dst,float x,float y,float z,float w,float h,float d,unsigned color,bool textured) {
     const float a=w*.5f,b=h*.5f,c=d*.5f;
     const Point corners[]={{x-a,y-b,z-c},{x+a,y-b,z-c},{x+a,y+b,z-c},{x-a,y+b,z-c},
         {x-a,y-b,z+c},{x+a,y-b,z+c},{x+a,y+b,z+c},{x-a,y+b,z+c}};
@@ -174,25 +182,23 @@ void Renderer::box(std::vector<Vertex>& dst,float x,float y,float z,float w,floa
     constexpr float shade[]={.89f,.77f,.83f,.68f,1.f,.51f};
     for(size_t face=0;face<6;++face) for(const int i:faces[face]) {
         const auto p=corners[i]; const auto s=shade[face];
-        dst.push_back({p.x,p.y,p.z,s*Channel(color,16),s*Channel(color,8),s*Channel(color,0)});
+        // World-space UVs: one 512px tile per 2 m, matching the old floor grid.
+        const float u=(face<2?p.x:(face<4?p.z:p.x))*.5f, v=(face<4?p.y:p.z)*.5f;
+        dst.push_back({p.x,p.y,p.z,s*Channel(color,16),s*Channel(color,8),s*Channel(color,0),u,v,textured?1.f:0.f});
     }
 }
 void Renderer::makeArena() {
     std::vector<Vertex> vertices;
-    box(vertices,0,-.14f,0,40,.28f,40,0x354c59);
-    for(int i=-20;i<=20;i+=2) {
-        box(vertices,static_cast<float>(i),.003f,0,.019f,.006f,40,0x405967);
-        box(vertices,0,.003f,static_cast<float>(i),40,.006f,.019f,0x405967);
-    }
+    box(vertices,0,-.14f,0,40,.28f,40,0x354c59,true);
     for(float side:{-20.f,20.f}) {
-        box(vertices,side,1.6f,0,.35f,3.2f,40,0x263949);
-        box(vertices,0,1.6f,side,40,3.2f,.35f,0x263949);
+        box(vertices,side,1.6f,0,.35f,3.2f,40,0x263949,true);
+        box(vertices,0,1.6f,side,40,3.2f,.35f,0x263949,true);
         box(vertices,side*.987f,.16f,0,.055f,.06f,40,0x7bb0b2);
         box(vertices,0,.16f,side*.987f,40,.06f,.055f,0x7bb0b2);
     }
     for(const auto& b:BasicFPS::Boxes) {
         const auto x=static_cast<float>(b.x),z=static_cast<float>(b.z),w=static_cast<float>(b.w),h=static_cast<float>(b.h),d=static_cast<float>(b.d);
-        box(vertices,x,h*.5f,z,w,h,d,(b.x==0&&b.z==0)?0x795949:0x5c696b);
+        box(vertices,x,h*.5f,z,w,h,d,(b.x==0&&b.z==0)?0x795949:0x5c696b,true);
         for(float side:{-1.f,1.f}) {
             box(vertices,x,h-.20f,z+side*d*.5f,w,.065f,.018f,0xd8bb88);
             box(vertices,x+side*w*.5f,h-.20f,z,.018f,.065f,d,0xd8bb88);
@@ -203,6 +209,37 @@ void Renderer::makeArena() {
     const D3D11_SUBRESOURCE_DATA data{vertices.data(),0,0};
     Check(device_->CreateBuffer(&desc,&data,&map_),"Arena buffer");
     mapCount_=static_cast<UINT>(vertices.size());
+}
+void Renderer::makeSurface() {
+    constexpr UINT Size=512, Edge=3;
+    std::vector<std::uint32_t> pixels(Size*Size);
+    for(UINT y=0;y<Size;++y) for(UINT x=0;x<Size;++x) {
+        std::uint32_t h=x*73856093u^y*19349663u; h^=h>>13; h*=0x5bd1e995u; h^=h>>15;
+        const bool line=x<Edge || x>=Size-Edge || y<Edge || y>=Size-Edge;
+        const float value=line?.86f:.5f+(static_cast<float>(h&255)/255.f-.5f)*.07f;
+        const auto c=static_cast<std::uint32_t>(std::lround(value*255));
+        pixels[y*Size+x]=0xff000000u|(c<<16)|(c<<8)|c;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width=desc.Height=Size; desc.MipLevels=0; desc.ArraySize=1; desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc={1,0}; desc.Usage=D3D11_USAGE_DEFAULT;
+    desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET; desc.MiscFlags=D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    ComPtr<ID3D11Texture2D> texture;
+    Check(device_->CreateTexture2D(&desc,nullptr,&texture),"Surface texture");
+    ctx_->UpdateSubresource(texture.Get(),0,nullptr,pixels.data(),Size*4,0);
+    Check(device_->CreateShaderResourceView(texture.Get(),nullptr,&surface_),"Surface texture view");
+    ctx_->GenerateMips(surface_.Get());
+}
+bool Renderer::setAnisotropy(UINT level) {
+    if(level!=1 && level!=2 && level!=4 && level!=8 && level!=16) return false;
+    if(level==anisotropy_ && sampler_) return true;
+    D3D11_SAMPLER_DESC desc{};
+    desc.Filter=level>1?D3D11_FILTER_ANISOTROPIC:D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    desc.AddressU=desc.AddressV=desc.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
+    desc.MaxAnisotropy=level; desc.ComparisonFunc=D3D11_COMPARISON_NEVER; desc.MaxLOD=D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> sampler;
+    if(FAILED(device_->CreateSamplerState(&desc,&sampler))) return false;
+    sampler_=std::move(sampler); anisotropy_=level; return true;
 }
 void Renderer::trace(std::vector<Vertex>& dst,const Trace& shot) {
     const auto a=XMVectorSet(shot.from.x,shot.from.y,shot.from.z,0);
@@ -217,7 +254,7 @@ void Renderer::trace(std::vector<Vertex>& dst,const Trace& shot) {
     const auto up=XMVector3Normalize(XMVector3Cross(right,delta))*.017f;
     for(const auto& axis:{right,up}) {
         const XMVECTOR quad[]={start-axis,start+axis,b+axis,start-axis,b+axis,b-axis};
-        for(const auto& v:quad) { XMFLOAT3 p; XMStoreFloat3(&p,v); dst.push_back({p.x,p.y,p.z,1,.73f,.33f}); }
+        for(const auto& v:quad) { XMFLOAT3 p; XMStoreFloat3(&p,v); dst.push_back({p.x,p.y,p.z,1,.73f,.33f,0,0,0}); }
     }
     if(shot.impact || shot.blood) box(dst,shot.to.x,shot.to.y,shot.to.z,.07f,.07f,.07f,shot.blood?0xe65449:0xfae0ac);
 }
@@ -245,6 +282,8 @@ void Renderer::frame(const Game& game,double now,double yaw,double pitch,const s
     ctx_->IASetInputLayout(layout_.Get()); ctx_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     ctx_->VSSetShader(vertex_.Get(),nullptr,0); ctx_->PSSetShader(pixel_.Get(),nullptr,0);
     ID3D11Buffer* uniform=camera_.Get(); ctx_->VSSetConstantBuffers(0,1,&uniform);
+    ID3D11ShaderResourceView* surface=surface_.Get(); ctx_->PSSetShaderResources(0,1,&surface);
+    ID3D11SamplerState* sampler=sampler_.Get(); ctx_->PSSetSamplers(0,1,&sampler);
     draw(map_.Get(),mapCount_);
     std::vector<Vertex> transient;
     transient.reserve(game.players.size()*360+game.traces.size()*48);

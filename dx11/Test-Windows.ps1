@@ -55,7 +55,10 @@ try {
         }
         if(-not $varied) { throw "Flat render output for MSAA $samples." }
     }
-    Write-Host 'PASS: Windows executable joined another room, opened and played in its own bundled room, and DX11 software render (off, 2x, 4x). No physical GPU/exclusive test.'
+    $off=Join-Path $OutputRoot 'dx11-af-1.bmp'; $sixteen=Join-Path $OutputRoot 'dx11-af-16.bmp'
+    if(-not (Test-Path $off) -or -not (Test-Path $sixteen)) { throw 'Missing anisotropic filtering render evidence.' }
+    if((Get-FileHash $off).Hash -eq (Get-FileHash $sixteen).Hash) { throw 'Anisotropic filtering 16x did not change the textured floor.' }
+    Write-Host 'PASS: Windows executable joined another room, opened and played in its own bundled room, and DX11 software render (MSAA off, 2x, 4x; anisotropic off vs 16x). No physical GPU/exclusive test.'
 } finally {
     $env:PORT=$oldPort
     foreach($process in @($client,$server)) {

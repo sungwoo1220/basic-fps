@@ -24,6 +24,8 @@ public:
     bool setSamples(UINT count);
     bool supports(UINT count) const;
     UINT samples() const { return samples_; }
+    bool setAnisotropy(UINT level);
+    UINT anisotropy() const { return anisotropy_; }
     std::wstring gpu;
     void frame(const Game& game,double now,double yaw,double pitch,const std::function<void()>& overlay,bool present=true);
     void readback(const std::wstring& bmp);
@@ -32,9 +34,9 @@ public:
     void label(Rect box,const std::wstring& text,int size,unsigned color,bool bold=false);
     bool hover(Rect box,POINT client) const;
 private:
-    struct Vertex { float x,y,z,r,g,b; };
+    struct Vertex { float x,y,z,r,g,b,u,v,textured; };
     HWND hwnd_;
-    UINT width_=0,height_=0,samples_=1,flags_=0,mapCount_=0;
+    UINT width_=0,height_=0,samples_=1,anisotropy_=0,flags_=0,mapCount_=0;
     bool resizeNeeded_=true,tearing_=false;
     float scale_=1,originX_=0,originY_=0;
     ComPtr<ID3D11Device> device_;
@@ -48,6 +50,8 @@ private:
     ComPtr<ID3D11PixelShader> pixel_;
     ComPtr<ID3D11RasterizerState> raster_;
     ComPtr<ID3D11Buffer> map_,objects_,camera_;
+    ComPtr<ID3D11ShaderResourceView> surface_;
+    ComPtr<ID3D11SamplerState> sampler_;
     ComPtr<ID2D1DeviceContext> overlay_;
     ComPtr<ID2D1Bitmap1> bitmap_;
     ComPtr<ID2D1SolidColorBrush> brush_;
@@ -57,8 +61,9 @@ private:
     void views(UINT count);
     void makePipeline();
     void makeArena();
+    void makeSurface();
     void draw(ID3D11Buffer* buffer,UINT count);
-    static void box(std::vector<Vertex>& dst,float x,float y,float z,float w,float h,float d,unsigned color);
+    static void box(std::vector<Vertex>& dst,float x,float y,float z,float w,float h,float d,unsigned color,bool textured=false);
     static void trace(std::vector<Vertex>& dst,const Trace& shot);
 };
 }

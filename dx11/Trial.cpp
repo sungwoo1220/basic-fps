@@ -20,11 +20,11 @@ constexpr DWORD WindowStyle=WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN;
 constexpr wchar_t ClassName[]=L"BasicFPS.DX11.Trial";
 constexpr int Limits[]={60,144,240,300,0};
 constexpr Rect Host{66,317,438,357}, Resume{66,365,438,405}, Connect{66,413,438,453}, Exit{66,461,438,501};
-constexpr Rect Mode{588,189,930,230}, Samples{588,248,930,289}, Limit{588,307,930,348};
-constexpr Rect Slower{588,366,640,407}, Sensitivity{648,366,872,407}, Faster{880,366,930,407}, Bots{588,425,930,466};
+constexpr Rect Mode{588,185,930,221}, Samples{588,229,930,265}, Filtering{588,273,930,309}, Limit{588,317,930,353};
+constexpr Rect Slower{588,361,640,397}, Sensitivity{648,361,872,397}, Faster{880,361,930,397}, Bots{588,405,930,441};
 constexpr Rect Keep{269,334,488,382}, Undo{512,334,731,382};
-constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Slower,Sensitivity,Faster,Bots};
-constexpr int BotsButton=10;
+constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Slower,Sensitivity,Faster,Filtering,Bots};
+constexpr int FilteringButton=10, BotsButton=11;
 // Same scale as the browser game (Valorant: 0.07 degrees per mouse count times sensitivity).
 constexpr double RadiansPerCount=Pi/180*.07;
 enum class Display { Windowed, Borderless, Exclusive };
@@ -146,6 +146,13 @@ public:
             const auto path=(std::filesystem::path(directory)/(L"dx11-msaa-"+std::to_wstring(count)+L".bmp")).wstring();
             gfx_->frame(game_,Now(),menu_?-Pi*.74:-Pi*.82,-.03,[this]{paint(Now());},false);
             gfx_->readback(path);
+        }
+        menu_=false;
+        if(!gfx_->setSamples(1) || !gfx_->resize()) throw std::runtime_error("Software render target not available");
+        for(UINT level:{1u,16u}) {
+            if(!gfx_->setAnisotropy(level)) throw std::runtime_error("Software anisotropic filtering not available");
+            gfx_->frame(game_,Now(),-Pi*.82,-.03,[this]{paint(Now());},false);
+            gfx_->readback((std::filesystem::path(directory)/(L"dx11-af-"+std::to_wstring(level)+L".bmp")).wstring());
         }
     }
     int loop() {
@@ -362,6 +369,11 @@ private:
             if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_SENS),hwnd_,SensitivityDialog,reinterpret_cast<LPARAM>(&value))==IDOK) setSensitivity(value);
             break;
         }
+        case FilteringButton: {
+            const UINT next=gfx_->anisotropy()>=16?1:gfx_->anisotropy()*2;
+            if(!gfx_->setAnisotropy(next)) note_=L"이방성 필터링을 적용하지 못했어요.";
+            break;
+        }
         case BotsButton:
             if(ownBots()) network_.send(std::string("{\"type\":\"bots\",\"count\":")+(botCount()?"0":"3")+"}");
             break;
@@ -477,13 +489,15 @@ private:
         const auto samples=gfx_->samples()==1?std::wstring(L"끔"):std::to_wstring(gfx_->samples())+L"배";
         button(Samples,L"MSAA   /   "+samples,5,gfx_->supports(2)||gfx_->supports(4));
         button(Limit,L"FPS 제한   /   "+(Limits[limit_]?std::to_wstring(Limits[limit_]):std::wstring(L"무제한")),6);
+        const auto filtering=gfx_->anisotropy()>1?std::to_wstring(gfx_->anisotropy())+L"배":std::wstring(L"끔");
+        button(Filtering,L"이방성 필터링   /   "+filtering,FilteringButton);
         button(Slower,L"  −",7); button(Faster,L"  +",9);
         button(Sensitivity,L"마우스 감도   /   "+Fixed(sensitivity_),8);
         if(ownBots()) { const int bots=botCount(); button(Bots,L"연습 봇   /   "+(bots?L"켬 ("+std::to_wstring(bots)+L"명)":std::wstring(L"끔")),BotsButton); }
-        else gfx_->label({589,425,927,466},L"연습 봇은 내가 만든 방에서 켜고 끌 수 있어요.",14,Muted);
-        gfx_->label({589,478,927,500},L"WASD 이동  ·  Shift 걷기  ·  클릭 사격",15,Muted);
-        gfx_->label({589,502,927,524},L"R 재장전  ·  Tab 점수판  ·  Esc 메뉴",15,Muted);
-        gfx_->label({589,527,927,549},L"감도는 브라우저 게임과 같은 값 · 렌더 100% · DX11",13,Aqua);
+        else gfx_->label({589,405,927,441},L"연습 봇은 내가 만든 방에서 켜고 끌 수 있어요.",14,Muted);
+        gfx_->label({589,452,927,474},L"WASD 이동  ·  Shift 걷기  ·  클릭 사격",15,Muted);
+        gfx_->label({589,477,927,499},L"R 재장전  ·  Tab 점수판  ·  Esc 메뉴",15,Muted);
+        gfx_->label({589,503,927,525},L"감도는 브라우저 게임과 같은 값 · 렌더 100% · DX11",13,Aqua);
         if(pendingDisplay_) {
             gfx_->rect({0,0,1000,600},Ink,.83f); gfx_->rect({247,208,753,404},0x203449);
             gfx_->line(247,208,753,208,Aqua,3);
