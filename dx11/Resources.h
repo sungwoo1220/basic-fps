@@ -1,0 +1,3 @@
+#define ID_CONNECT 101
+#define ID_ADDRESS 1001
+#define ID_NICKNAME 1002
