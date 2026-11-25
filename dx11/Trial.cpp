@@ -1,4 +1,5 @@
 #include "Network.h"
+#include "Room.h"
 #include "Renderer.h"
 #include "Resources.h"
 #include <windowsx.h>
@@ -18,10 +19,10 @@ constexpr double Pi=3.14159265358979323846;
 constexpr DWORD WindowStyle=WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN;
 constexpr wchar_t ClassName[]=L"BasicFPS.DX11.Trial";
 constexpr int Limits[]={60,144,240,300,0};
-constexpr Rect Resume{66,341,438,383}, Connect{66,393,438,435}, Exit{66,445,438,487};
+constexpr Rect Host{66,317,438,357}, Resume{66,365,438,405}, Connect{66,413,438,453}, Exit{66,461,438,501};
 constexpr Rect Mode{588,189,930,230}, Samples{588,248,930,289}, Limit{588,307,930,348}, Bots{588,366,930,407};
 constexpr Rect Keep{269,334,488,382}, Undo{512,334,731,382};
-constexpr Rect Buttons[]={Resume,Connect,Exit,Mode,Samples,Limit,Bots};
+constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Bots};
 enum class Display { Windowed, Borderless, Exclusive };
 const wchar_t* Name(Display mode) {
     switch(mode) {
@@ -37,16 +38,20 @@ INT_PTR CALLBACK ConnectDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
         SetWindowLongPtrW(window,DWLP_USER,l);
         SendDlgItemMessageW(window,ID_ADDRESS,EM_SETLIMITTEXT,2048,0);
         SendDlgItemMessageW(window,ID_NICKNAME,EM_SETLIMITTEXT,16,0);
-        SetDlgItemTextW(window,ID_ADDRESS,form->address.c_str()); SetDlgItemTextW(window,ID_NICKNAME,form->nick.c_str());
+        if(GetDlgItem(window,ID_ADDRESS)) SetDlgItemTextW(window,ID_ADDRESS,form->address.c_str());
+        SetDlgItemTextW(window,ID_NICKNAME,form->nick.c_str());
         return TRUE;
     }
     if(msg!=WM_COMMAND) return FALSE;
     if(LOWORD(w)==IDOK) {
         auto* form=reinterpret_cast<ConnectForm*>(GetWindowLongPtrW(window,DWLP_USER));
         wchar_t address[2049]{},nick[17]{};
-        GetDlgItemTextW(window,ID_ADDRESS,address,static_cast<int>(std::size(address)));
+        if(GetDlgItem(window,ID_ADDRESS)) {
+            GetDlgItemTextW(window,ID_ADDRESS,address,static_cast<int>(std::size(address)));
+            form->address=address;
+        }
         GetDlgItemTextW(window,ID_NICKNAME,nick,static_cast<int>(std::size(nick)));
-        form->address=address; form->nick=nick;
+        form->nick=nick;
         if(form->nick.empty()) form->nick=L"Player";
         if(form->nick.back()>=0xd800 && form->nick.back()<=0xdbff) form->nick.pop_back();
         EndDialog(window,IDOK); return TRUE;
@@ -126,7 +131,7 @@ private:
     HMONITOR monitor_=nullptr;
     RECT windowed_{};
     bool active_=true, menu_=true, clipped_=false, closing_=false, wasConnected_=false, fire_=false, reload_=false;
-    bool pendingDisplay_=false, needsRevert_=false;
+    bool pendingDisplay_=false, needsRevert_=false, hosted_=false, joinPending_=false;
     Display display_=Display::Windowed, previous_=Display::Windowed;
     double deadline_=0, connectDeadline_=0, yaw_=0, pitch_=0;
     int limit_=3, fps_=0, focus_=-1, bots_=3;
@@ -134,7 +139,9 @@ private:
     std::array<bool,256> keys_{};
     ConnectForm form_;
     Game game_;
+    Room room_;
     Network network_;
+    std::wstring lan_;
     std::unique_ptr<Renderer> gfx_;
     std::wstring note_;
     std::string fault_;
@@ -189,7 +196,26 @@ private:
         }
         return false;
     }
+    void host() {
+        if(room_.running()) {
+            if(hosted_ && form_.address==room_.local()) network_.stop();
+            joinPending_=hosted_=false; room_.stop(); game_=Game{}; note_=L"방을 닫았어요."; return;
+        }
+        if(display_==Display::Exclusive) { note_=L"방을 만들려면 먼저 창모드로 바꿔 주세요."; return; }
+        if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_HOST),hwnd_,ConnectDialog,reinterpret_cast<LPARAM>(&form_))!=IDOK) return;
+        std::wstring error;
+        if(!room_.start(error)) { note_=error; return; }
+        form_.address=room_.local(); lan_=room_.lan();
+        hosted_=joinPending_=true; network_.stop(); game_=Game{}; note_=L"방을 여는 중이에요…";
+    }
     void tick(double now,double dt,double& due) {
+        if(hosted_ && !room_.running()) {
+            joinPending_=hosted_=false; network_.stop(); note_=L"방이 종료됐어요. 다시 만들 수 있어요.";
+        }
+        if(joinPending_ && !network_.busy()) {
+            joinPending_=false; note_.clear(); game_=Game{}; wasConnected_=false;
+            if(network_.start(form_.address,form_.nick,10000)) connectDeadline_=Now()+14;
+        }
         for(const auto& packet:network_.drain()) game_.receive(packet,now);
         if(game_.own()) { wasConnected_=true; connectDeadline_=0; }
         if(connectDeadline_ && now>connectDeadline_ && network_.busy()) { network_.stop(); connectDeadline_=0; note_=L"방 응답 시간이 초과됐어요."; }
@@ -246,7 +272,7 @@ private:
     }
     void confirm(bool keep) {
         if(!pendingDisplay_) return;
-        pendingDisplay_=needsRevert_=false; focus_=3;
+        pendingDisplay_=needsRevert_=false; focus_=4;
         if(!keep) {
             if(!apply(previous_) && !apply(Display::Windowed)) note_=L"화면을 복구하지 못했어요. 게임을 다시 실행해 주세요.";
             else note_=L"이전 화면 모드로 돌아왔어요.";
@@ -255,15 +281,16 @@ private:
     void action(int button) {
         if(pendingDisplay_) { confirm(button==0); return; }
         switch(button) {
-        case 0: if(game_.own()) showMenu(false); break;
-        case 1:
+        case 0: host(); break;
+        case 1: if(game_.own()) showMenu(false); break;
+        case 2:
             if(network_.busy()) { network_.stop(); game_=Game{}; note_=L"방 연결을 종료하고 있어요…"; break; }
             if(display_==Display::Exclusive) { note_=L"다른 방에 연결하려면 먼저 창모드로 바꿔 주세요."; break; }
             if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_CONNECT),hwnd_,ConnectDialog,reinterpret_cast<LPARAM>(&form_))==IDOK) connect();
             break;
-        case 2: closing_=true; break;
-        case 3: chooseDisplay(); break;
-        case 4: {
+        case 3: closing_=true; break;
+        case 4: chooseDisplay(); break;
+        case 5: {
             auto next=gfx_->samples();
             for(int i=0;i<3;++i) {
                 next=next==4?1:next*2;
@@ -271,8 +298,8 @@ private:
             }
             break;
         }
-        case 5: limit_=(limit_+1)%static_cast<int>(std::size(Limits)); break;
-        case 6:
+        case 6: limit_=(limit_+1)%static_cast<int>(std::size(Limits)); break;
+        case 7:
             if(game_.own() && localRoom()) {
                 int count=0; for(const auto& p:game_.players) if(p.first.rfind("bot-",0)==0) ++count;
                 bots_=(count+1)%7; network_.send("{\"type\":\"bots\",\"count\":"+std::to_string(bots_)+"}");
@@ -376,21 +403,22 @@ private:
         gfx_->label({67,145,435,179},L"DX11 Windows 시험판",21,Aqua,true);
         gfx_->label({67,195,438,222},std::to_wstring(fps_)+L" FPS   /   "+gfx_->gpu,14,Chalk);
         gfx_->line(66,236,430,236,0x40566a);
-        gfx_->label({67,246,437,271},player?L"방에 연결됐어요.":L"방 연결",16,Chalk,true);
-        const auto status=!note_.empty()?note_:(!game_.error.empty()?ToWide(game_.error):(player?form_.address:network_.status()));
-        gfx_->label({67,275,437,307},status.empty()?L"같은 PC 또는 친구가 연 방에 접속해요.":status,14,Muted);
-        button(Resume,L"계속하기",0,player!=nullptr,true);
-        button(Connect,network_.busy()?L"연결 끊기":L"방에 연결",1);
-        button(Exit,L"종료",2);
+        gfx_->label({67,246,437,271},player?(hosted_&&localRoom()?L"내 방에 들어왔어요.":L"방에 연결됐어요."):L"방 만들기 또는 연결",16,Chalk,true);
+        const auto status=!note_.empty()?note_:(!game_.error.empty()?ToWide(game_.error):(player?(hosted_&&localRoom()?L"친구 접속 주소  "+(lan_.empty()?form_.address:lan_):form_.address):network_.status()));
+        gfx_->label({67,275,437,307},status.empty()?L"방을 만들면 바로 들어가요. 친구 방에도 연결할 수 있어요.":status,14,Muted);
+        button(Host,room_.running()?L"내 방 닫기":L"방 만들기",0,true,!player);
+        button(Resume,L"계속하기",1,player!=nullptr,player!=nullptr);
+        button(Connect,network_.busy()?L"연결 끊기":L"다른 방에 연결",2);
+        button(Exit,L"종료",3);
         gfx_->label({588,130,930,175},L"화면과 연습",29,Chalk,true);
         std::wstring m=Name(display_);
         if(display_==Display::Exclusive && gfx_->exclusive()) m+=L" · DXGI 확인";
-        button(Mode,L"화면 모드   /   "+m,3);
+        button(Mode,L"화면 모드   /   "+m,4);
         const auto samples=gfx_->samples()==1?std::wstring(L"끔"):std::to_wstring(gfx_->samples())+L"배";
-        button(Samples,L"MSAA   /   "+samples,4,gfx_->supports(2)||gfx_->supports(4));
-        button(Limit,L"FPS 제한   /   "+(Limits[limit_]?std::to_wstring(Limits[limit_]):std::wstring(L"무제한")),5);
+        button(Samples,L"MSAA   /   "+samples,5,gfx_->supports(2)||gfx_->supports(4));
+        button(Limit,L"FPS 제한   /   "+(Limits[limit_]?std::to_wstring(Limits[limit_]):std::wstring(L"무제한")),6);
         int count=0; for(const auto& p:game_.players) if(p.first.rfind("bot-",0)==0) ++count;
-        button(Bots,player&&localRoom()?L"연습 봇   /   "+std::to_wstring(count)+L"명":L"연습 봇   /   내 PC에서만",6,player&&localRoom());
+        button(Bots,player&&localRoom()?L"연습 봇   /   "+std::to_wstring(count)+L"명":L"연습 봇   /   내 PC에서만",7,player&&localRoom());
         gfx_->label({589,430,927,454},L"WASD 이동  ·  Shift 걷기  ·  클릭 사격",15,Muted);
         gfx_->label({589,460,927,484},L"R 재장전  ·  Tab 점수판  ·  Esc 메뉴",15,Muted);
         gfx_->label({589,497,927,522},L"렌더 해상도 100% · DX11 포워드",13,Aqua);
@@ -423,12 +451,12 @@ private:
     }
 };
 
-int Smoke(const std::wstring& url,const std::wstring& path) {
+int Smoke(const std::wstring& url,const std::wstring& path,unsigned wait=0) {
     std::ofstream log{std::filesystem::path(path)};
     if(!log) return 2;
     Network net; Game game;
-    if(!BasicFPS::RunGoldenCases() || !net.start(url,L"DX11 smoke")) { log<<"Startup checks failed\n"; return 2; }
-    const auto end=Now()+18;
+    if(!BasicFPS::RunGoldenCases() || !net.start(url,L"DX11 smoke",wait)) { log<<"Startup checks failed\n"; return 2; }
+    const auto end=Now()+18+wait/1000.;
     double stageTime=0, x=0,z=0,next=Now();
     int stage=0, direction=0;
     bool reloading=false;
@@ -479,8 +507,16 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
     if(argv) { args.assign(argv,argv+argc); LocalFree(argv); }
     const bool graphicsSmoke=args.size()==3 && args[1]==L"--render-smoke";
     const bool networkSmoke=args.size()==4 && args[1]==L"--smoke";
+    const bool hostSmoke=args.size()==3 && args[1]==L"--host-smoke";
     try {
         if(networkSmoke) return Smoke(args[2],args[3]);
+        if(hostSmoke) {
+            Room room; std::wstring error;
+            if(!room.start(error)) { std::ofstream(std::filesystem::path(args[2]))<<"Room failed: "<<ToUtf8(error)<<'\n'; return 4; }
+            const int result=Smoke(room.local(),args[2],10000);
+            if(result==0 && !room.running()) return 5;
+            return result;
+        }
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         App app(instance);
         if(graphicsSmoke) { app.create(true); app.capture(args[2]); return 0; }
@@ -488,8 +524,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR,int) {
         if(args.size()==3 && args[1]==L"--server") app.start(args[2]);
         return app.loop();
     } catch(const std::exception& e) {
-        if(networkSmoke || graphicsSmoke) {
-            const auto file=graphicsSmoke?std::filesystem::path(args[2])/L"render-error.txt":std::filesystem::path(args[3]);
+        if(networkSmoke || graphicsSmoke || hostSmoke) {
+            const auto file=graphicsSmoke?std::filesystem::path(args[2])/L"render-error.txt":std::filesystem::path(args[hostSmoke?2:3]);
             std::ofstream log(file,std::ios::app); log<<e.what()<<'\n';
         } else MessageBoxW(nullptr,(L"DX11 시험판을 실행하지 못했어요.\n\n"+ToWide(e.what())).c_str(),L"Basic FPS",MB_OK|MB_ICONERROR);
         return 1;

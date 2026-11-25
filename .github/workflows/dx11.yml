@@ -28,17 +28,31 @@ jobs:
           cmake -S dx11 -B "$env:RUNNER_TEMP/dx11" -A x64
           cmake --build "$env:RUNNER_TEMP/dx11" --config Release --parallel
           ctest --test-dir "$env:RUNNER_TEMP/dx11" -C Release --output-on-failure
-      - name: Try the actual Windows executable with a private test room and software graphics
+      - name: Assemble a self-contained folder with the room
         run: |
           $runtime=Join-Path $env:RUNNER_TEMP 'dx11-room-deps'
           npm.cmd install --prefix $runtime --no-audit --no-fund --no-save ws@8.18.3 three@0.170.0
           $env:NODE_PATH=Join-Path $runtime 'node_modules'
           node scripts/copy-three.cjs
-          ./dx11/Test-Windows.ps1 -GameExe "$env:RUNNER_TEMP/dx11/Release/BasicFPS-DX11.exe" -OutputRoot "$env:RUNNER_TEMP/dx11-evidence"
+          Remove-Item Env:NODE_PATH
+          $pkg=New-Item -ItemType Directory "$env:RUNNER_TEMP/dx11-package" -Force
+          $room=New-Item -ItemType Directory (Join-Path $pkg 'room') -Force
+          Copy-Item "$env:RUNNER_TEMP/dx11/Release/BasicFPS-DX11.exe",'dx11/README.md' $pkg
+          $node=(Get-Command node).Source
+          Copy-Item $node (Join-Path $room 'node.exe')
+          $license=Join-Path (Split-Path $node) 'LICENSE'
+          if(Test-Path $license) { Copy-Item $license (Join-Path $room 'NODE-LICENSE.txt') }
+          Copy-Item game/server.js $room
+          Copy-Item game/public (Join-Path $room 'public') -Recurse
+          '{"name":"basic-fps-room","private":true,"type":"commonjs","dependencies":{"ws":"8.18.3"}}' | Set-Content (Join-Path $room 'package.json') -Encoding ascii
+          npm.cmd install --prefix $room --omit=dev --no-package-lock --no-audit --no-fund
+          if(-not (Test-Path (Join-Path $room 'public/three.module.js'))) { throw 'three.module.js missing from the room.' }
+      - name: Try the packaged executable, its own room and software graphics
+        run: ./dx11/Test-Windows.ps1 -GameExe "$env:RUNNER_TEMP/dx11-package/BasicFPS-DX11.exe" -OutputRoot "$env:RUNNER_TEMP/dx11-evidence"
       - name: Package portable trial
         run: |
           $out=New-Item -ItemType Directory "$env:RUNNER_TEMP/dx11-download" -Force
-          Compress-Archive -Path "$env:RUNNER_TEMP/dx11/Release/BasicFPS-DX11.exe",'dx11/README.md' -DestinationPath "$out/BasicFPS-DX11-Win64.zip"
+          Compress-Archive -Path "$env:RUNNER_TEMP/dx11-package/*" -DestinationPath "$out/BasicFPS-DX11-Win64.zip"
           $hash=(Get-FileHash "$out/BasicFPS-DX11-Win64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  BasicFPS-DX11-Win64.zip" | Set-Content "$out/SHA256SUMS.txt" -Encoding ascii
       - uses: actions/upload-artifact@v4
@@ -72,4 +86,4 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" download/BasicFPS-DX11-Win64.zip download/SHA256SUMS.txt \
             --target "$SOURCE_SHA" --prerelease --latest=false --title "Basic FPS DX11 Windows 시험판" \
-            --notes "에픽 계정 없이 실행하는 별도 시험판입니다. 기존 런처로 방을 연 뒤 ZIP을 풀고 BasicFPS-DX11.exe에서 방 주소를 입력하세요. Windows 통신과 소프트웨어 DX11 렌더링을 자동 확인했습니다. 노트북 외장 GPU·독점 전체화면·MSAA 성능은 별도 확인이 필요합니다."
+            --notes "에픽 계정 없이 실행하는 별도 시험판입니다. 기존 런처 없이 ZIP을 풀고 BasicFPS-DX11.exe에서 방 만들기를 누르면 됩니다. 앱이 연 방 입장, Windows 통신과 소프트웨어 DX11 렌더링을 자동 확인했습니다. 노트북 외장 GPU·독점 전체화면·MSAA 성능은 별도 확인이 필요합니다."
