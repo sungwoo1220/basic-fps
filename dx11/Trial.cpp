@@ -13,16 +13,20 @@
 
 namespace Trial {
 namespace {
+constexpr double Pi=3.14159265358979323846;
 using Clock=std::chrono::steady_clock;
 double Now() { return std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); }
-constexpr double Pi=3.14159265358979323846;
 constexpr DWORD WindowStyle=WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN;
 constexpr wchar_t ClassName[]=L"BasicFPS.DX11.Trial";
 constexpr int Limits[]={60,144,240,300,0};
 constexpr Rect Host{66,317,438,357}, Resume{66,365,438,405}, Connect{66,413,438,453}, Exit{66,461,438,501};
-constexpr Rect Mode{588,189,930,230}, Samples{588,248,930,289}, Limit{588,307,930,348}, Bots{588,366,930,407};
+constexpr Rect Mode{588,189,930,230}, Samples{588,248,930,289}, Limit{588,307,930,348};
+constexpr Rect Slower{588,366,640,407}, Sensitivity{648,366,872,407}, Faster{880,366,930,407}, Bots{588,425,930,466};
 constexpr Rect Keep{269,334,488,382}, Undo{512,334,731,382};
-constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Bots};
+constexpr Rect Buttons[]={Host,Resume,Connect,Exit,Mode,Samples,Limit,Slower,Sensitivity,Faster,Bots};
+constexpr int BotsButton=10;
+// Same scale as the browser game (Valorant: 0.07 degrees per mouse count times sensitivity).
+constexpr double RadiansPerCount=Pi/180*.07;
 enum class Display { Windowed, Borderless, Exclusive };
 const wchar_t* Name(Display mode) {
     switch(mode) {
@@ -60,6 +64,52 @@ INT_PTR CALLBACK ConnectDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
     return FALSE;
 }
 
+std::wstring Fixed(double value) {
+    wchar_t text[32]{}; swprintf(text,std::size(text),L"%.3f",value); return text;
+}
+double ClampSensitivity(double value) { return std::round(std::clamp(value,.001,10.)*1000)/1000; }
+std::filesystem::path SettingsFile() {
+    const wchar_t* base=_wgetenv(L"LOCALAPPDATA");
+    if(!base || !*base) return {};
+    return std::filesystem::path(base)/L"BasicFPS-DX11"/L"sensitivity.txt";
+}
+double LoadSensitivity() {
+    const auto file=SettingsFile();
+    std::ifstream in(file);
+    double value=0;
+    return !file.empty() && in>>value && std::isfinite(value)?ClampSensitivity(value):.35;
+}
+void SaveSensitivity(double value) {
+    const auto file=SettingsFile();
+    if(file.empty()) return;
+    std::error_code ec; std::filesystem::create_directories(file.parent_path(),ec);
+    std::ofstream(file)<<ToUtf8(Fixed(value));
+}
+INT_PTR CALLBACK SensitivityDialog(HWND window,UINT msg,WPARAM w,LPARAM l) {
+    if(msg==WM_INITDIALOG) {
+        SetWindowLongPtrW(window,DWLP_USER,l);
+        SendDlgItemMessageW(window,ID_SENSVALUE,EM_SETLIMITTEXT,8,0);
+        SetDlgItemTextW(window,ID_SENSVALUE,Fixed(*reinterpret_cast<double*>(l)).c_str());
+        SendDlgItemMessageW(window,ID_SENSVALUE,EM_SETSEL,0,-1);
+        return TRUE;
+    }
+    if(msg!=WM_COMMAND) return FALSE;
+    if(LOWORD(w)==IDOK) {
+        wchar_t text[16]{};
+        GetDlgItemTextW(window,ID_SENSVALUE,text,static_cast<int>(std::size(text)));
+        wchar_t* end=nullptr;
+        const double value=std::wcstod(text,&end);
+        if(end==text || *end || !std::isfinite(value) || value<.001 || value>10) {
+            MessageBoxW(window,L"0.001부터 10 사이의 숫자를 입력해 주세요.",L"마우스 감도",MB_OK|MB_ICONINFORMATION);
+            return TRUE;
+        }
+        *reinterpret_cast<double*>(GetWindowLongPtrW(window,DWLP_USER))=ClampSensitivity(value);
+        EndDialog(window,IDOK); return TRUE;
+    }
+    if(LOWORD(w)==IDCANCEL) { EndDialog(window,IDCANCEL); return TRUE; }
+    return FALSE;
+}
+
 class App {
 public:
     explicit App(HINSTANCE instance):instance_(instance) {}
@@ -89,6 +139,7 @@ public:
         Player own; own.id="1"; own.ammo=9; sample.players.emplace("1",own);
         Player other; other.id="bot-1"; other.state={-9,-3,0,0}; sample.players.emplace("bot-1",other);
         game_=std::move(sample); fps_=0;
+        hosted_=true; lan_=L"http://192.168.0.10:3000";
         for(UINT count:{1u,2u,4u}) {
             if(!gfx_->setSamples(count) || !gfx_->resize()) throw std::runtime_error("Software MSAA render target not available");
             menu_=count==1;
@@ -134,7 +185,8 @@ private:
     bool pendingDisplay_=false, needsRevert_=false, hosted_=false, joinPending_=false;
     Display display_=Display::Windowed, previous_=Display::Windowed;
     double deadline_=0, connectDeadline_=0, yaw_=0, pitch_=0;
-    int limit_=3, fps_=0, focus_=-1, bots_=3;
+    int limit_=3, fps_=0, focus_=-1;
+    double sensitivity_=LoadSensitivity();
     POINT pointer_{-10000,-10000};
     std::array<bool,256> keys_{};
     ConnectForm form_;
@@ -278,6 +330,9 @@ private:
             else note_=L"이전 화면 모드로 돌아왔어요.";
         } else note_=L"화면 모드를 유지했어요.";
     }
+    bool ownBots() const { return hosted_ && game_.own() && localRoom(); }
+    int botCount() const { int count=0; for(const auto& p:game_.players) if(p.first.rfind("bot-",0)==0) ++count; return count; }
+    void setSensitivity(double value) { sensitivity_=ClampSensitivity(value); SaveSensitivity(sensitivity_); }
     void action(int button) {
         if(pendingDisplay_) { confirm(button==0); return; }
         switch(button) {
@@ -299,11 +354,16 @@ private:
             break;
         }
         case 6: limit_=(limit_+1)%static_cast<int>(std::size(Limits)); break;
-        case 7:
-            if(game_.own() && localRoom()) {
-                int count=0; for(const auto& p:game_.players) if(p.first.rfind("bot-",0)==0) ++count;
-                bots_=(count+1)%7; network_.send("{\"type\":\"bots\",\"count\":"+std::to_string(bots_)+"}");
-            }
+        case 7: case 9:
+            setSensitivity(sensitivity_+(button==7?-.01:.01)); break;
+        case 8: {
+            double value=sensitivity_;
+            if(display_==Display::Exclusive) { note_=L"감도를 직접 입력하려면 먼저 창모드로 바꿔 주세요. -, + 버튼은 쓸 수 있어요."; break; }
+            if(DialogBoxParamW(instance_,MAKEINTRESOURCEW(ID_SENS),hwnd_,SensitivityDialog,reinterpret_cast<LPARAM>(&value))==IDOK) setSensitivity(value);
+            break;
+        }
+        case BotsButton:
+            if(ownBots()) network_.send(std::string("{\"type\":\"bots\",\"count\":")+(botCount()?"0":"3")+"}");
             break;
         default: break;
         }
@@ -333,7 +393,7 @@ private:
                 if(pendingDisplay_) {
                     if(gfx_->hover(Keep,p)) action(0);
                     else if(gfx_->hover(Undo,p)) action(1);
-                } else for(size_t i=0;i<std::size(Buttons);++i) if(gfx_->hover(Buttons[i],p)) { action(static_cast<int>(i)); break; }
+                } else for(size_t i=0;i<std::size(Buttons);++i) if((i!=BotsButton || ownBots()) && gfx_->hover(Buttons[i],p)) { action(static_cast<int>(i)); break; }
             }
             return 0;
         case WM_LBUTTONUP: fire_=false; return 0;
@@ -342,8 +402,8 @@ private:
                 RAWINPUT data{}; UINT bytes=sizeof data;
                 const auto read=GetRawInputData(reinterpret_cast<HRAWINPUT>(l),RID_INPUT,&data,&bytes,sizeof(RAWINPUTHEADER));
                 if(read!=static_cast<UINT>(-1) && data.header.dwType==RIM_TYPEMOUSE && !(data.data.mouse.usFlags&MOUSE_MOVE_ABSOLUTE)) {
-                    yaw_=std::remainder(yaw_-data.data.mouse.lLastX*.0025,Pi*2);
-                    pitch_=std::clamp(pitch_-data.data.mouse.lLastY*.0025,-1.45,1.45);
+                    yaw_=std::remainder(yaw_-data.data.mouse.lLastX*RadiansPerCount*sensitivity_,Pi*2);
+                    pitch_=std::clamp(pitch_-data.data.mouse.lLastY*RadiansPerCount*sensitivity_,-1.45,1.45);
                 }
             }
             break;
@@ -354,7 +414,7 @@ private:
                 if(pendingDisplay_) confirm(false);
                 else if(!menu_ || game_.own()) showMenu(!menu_);
             } else if(menu_ && w==VK_TAB) {
-                const int count=pendingDisplay_?2:static_cast<int>(std::size(Buttons));
+                const int count=pendingDisplay_?2:static_cast<int>(std::size(Buttons))-(ownBots()?0:1);
                 const int direction=GetKeyState(VK_SHIFT)<0?-1:1;
                 focus_=focus_<0?(direction>0?0:count-1):(focus_+count+direction)%count;
             } else if(menu_ && (w==VK_RETURN || w==VK_SPACE) && focus_>=0) action(focus_);
@@ -410,18 +470,20 @@ private:
         button(Resume,L"계속하기",1,player!=nullptr,player!=nullptr);
         button(Connect,network_.busy()?L"연결 끊기":L"다른 방에 연결",2);
         button(Exit,L"종료",3);
-        gfx_->label({588,130,930,175},L"화면과 연습",29,Chalk,true);
+        gfx_->label({588,130,930,175},L"설정",29,Chalk,true);
         std::wstring m=Name(display_);
         if(display_==Display::Exclusive && gfx_->exclusive()) m+=L" · DXGI 확인";
         button(Mode,L"화면 모드   /   "+m,4);
         const auto samples=gfx_->samples()==1?std::wstring(L"끔"):std::to_wstring(gfx_->samples())+L"배";
         button(Samples,L"MSAA   /   "+samples,5,gfx_->supports(2)||gfx_->supports(4));
         button(Limit,L"FPS 제한   /   "+(Limits[limit_]?std::to_wstring(Limits[limit_]):std::wstring(L"무제한")),6);
-        int count=0; for(const auto& p:game_.players) if(p.first.rfind("bot-",0)==0) ++count;
-        button(Bots,player&&localRoom()?L"연습 봇   /   "+std::to_wstring(count)+L"명":L"연습 봇   /   내 PC에서만",7,player&&localRoom());
-        gfx_->label({589,430,927,454},L"WASD 이동  ·  Shift 걷기  ·  클릭 사격",15,Muted);
-        gfx_->label({589,460,927,484},L"R 재장전  ·  Tab 점수판  ·  Esc 메뉴",15,Muted);
-        gfx_->label({589,497,927,522},L"렌더 해상도 100% · DX11 포워드",13,Aqua);
+        button(Slower,L"  −",7); button(Faster,L"  +",9);
+        button(Sensitivity,L"마우스 감도   /   "+Fixed(sensitivity_),8);
+        if(ownBots()) { const int bots=botCount(); button(Bots,L"연습 봇   /   "+(bots?L"켬 ("+std::to_wstring(bots)+L"명)":std::wstring(L"끔")),BotsButton); }
+        else gfx_->label({589,425,927,466},L"연습 봇은 내가 만든 방에서 켜고 끌 수 있어요.",14,Muted);
+        gfx_->label({589,478,927,500},L"WASD 이동  ·  Shift 걷기  ·  클릭 사격",15,Muted);
+        gfx_->label({589,502,927,524},L"R 재장전  ·  Tab 점수판  ·  Esc 메뉴",15,Muted);
+        gfx_->label({589,527,927,549},L"감도는 브라우저 게임과 같은 값 · 렌더 100% · DX11",13,Aqua);
         if(pendingDisplay_) {
             gfx_->rect({0,0,1000,600},Ink,.83f); gfx_->rect({247,208,753,404},0x203449);
             gfx_->line(247,208,753,208,Aqua,3);

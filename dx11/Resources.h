@@ -2,3 +2,5 @@
 #define ID_HOST 102
 #define ID_ADDRESS 1001
 #define ID_NICKNAME 1002
+#define ID_SENS 103
+#define ID_SENSVALUE 1003
