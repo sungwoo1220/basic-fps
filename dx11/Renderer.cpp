@@ -19,9 +19,9 @@ float Channel(unsigned color,unsigned shift) { return static_cast<float>((color>
 D2D1_COLOR_F Color(unsigned value,float alpha) { return D2D1::ColorF(Channel(value,16),Channel(value,8),Channel(value,0),alpha); }
 constexpr char Shader[]=R"(
 cbuffer Camera : register(b0) { row_major float4x4 vp; };
-struct V { float3 point : POSITION; float3 color : COLOR; };
+struct V { float3 position : POSITION; float3 color : COLOR; };
 struct P { float4 pos : SV_POSITION; float3 color : COLOR; float dist : TEXCOORD; };
-P VS(V v) { P o; o.pos=mul(float4(v.point,1),vp); o.color=v.color; o.dist=o.pos.w; return o; }
+P VS(V v) { P o; o.pos=mul(float4(v.position,1),vp); o.color=v.color; o.dist=o.pos.w; return o; }
 float4 PS(P p) : SV_TARGET {
     float haze=saturate((p.dist-12)/68);
     return float4(lerp(p.color,float3(.19,.27,.34),haze*.67),1);
@@ -139,9 +139,15 @@ void Renderer::views(UINT count) {
     msaa_=std::move(msaa); target_=std::move(target); depth_=std::move(depth);
 }
 void Renderer::makePipeline() {
-    ComPtr<ID3DBlob> vs,ps;
-    Check(D3DCompile(Shader,sizeof Shader-1,nullptr,nullptr,nullptr,"VS","vs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vs,nullptr),"Vertex shader compile");
-    Check(D3DCompile(Shader,sizeof Shader-1,nullptr,nullptr,nullptr,"PS","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ps,nullptr),"Pixel shader compile");
+    const auto compile=[](const char* entry,const char* profile) {
+        ComPtr<ID3DBlob> blob,errors;
+        const HRESULT hr=D3DCompile(Shader,sizeof Shader-1,"BasicFPS-DX11.hlsl",nullptr,nullptr,entry,profile,
+            D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&blob,&errors);
+        if(FAILED(hr) && errors) throw std::runtime_error(static_cast<const char*>(errors->GetBufferPointer()));
+        Check(hr,"Build DX11 shader");
+        return blob;
+    };
+    const auto vs=compile("VS","vs_5_0"),ps=compile("PS","ps_5_0");
     Check(device_->CreateVertexShader(vs->GetBufferPointer(),vs->GetBufferSize(),nullptr,&vertex_),"Vertex shader");
     Check(device_->CreatePixelShader(ps->GetBufferPointer(),ps->GetBufferSize(),nullptr,&pixel_),"Pixel shader");
     const D3D11_INPUT_ELEMENT_DESC input[]={

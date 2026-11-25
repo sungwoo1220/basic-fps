@@ -88,7 +88,7 @@ public:
             if(!gfx_->setSamples(count) || !gfx_->resize()) throw std::runtime_error("Software MSAA render target not available");
             menu_=count==1;
             const auto path=(std::filesystem::path(directory)/(L"dx11-msaa-"+std::to_wstring(count)+L".bmp")).wstring();
-            gfx_->frame(game_,Now(),menu_?Pi*.74:Pi*.82,0,[this]{paint(Now());},false);
+            gfx_->frame(game_,Now(),menu_?-Pi*.74:-Pi*.82,-.03,[this]{paint(Now());},false);
             gfx_->readback(path);
         }
     }
