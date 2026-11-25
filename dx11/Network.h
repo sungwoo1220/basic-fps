@@ -17,7 +17,7 @@ public:
     ~Network();
     Network(const Network&)=delete;
     Network& operator=(const Network&)=delete;
-    bool start(const std::wstring& url,const std::wstring& nick);
+    bool start(const std::wstring& url,const std::wstring& nick,unsigned waitMs=0);
     bool send(std::string message);
     void stop();
     bool busy() const { return running_; }
@@ -32,6 +32,7 @@ private:
     std::condition_variable changed_;
     std::deque<std::string> incoming_,outgoing_;
     std::wstring status_;
+    unsigned wait_=0;
     std::thread worker_;
 };
 }

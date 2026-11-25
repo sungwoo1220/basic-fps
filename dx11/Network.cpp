@@ -9,7 +9,8 @@ namespace {
 struct Internet {
     HINTERNET h;
     explicit Internet(HINTERNET value):h(value) {}
-    ~Internet() { if(h) WinHttpCloseHandle(h); }
+    ~Internet() { reset(); }
+    void reset(HINTERNET value=nullptr) { if(h) WinHttpCloseHandle(h); h=value; }
     Internet(const Internet&)=delete;
     Internet& operator=(const Internet&)=delete;
 };
@@ -47,8 +48,9 @@ std::wstring ToWide(const std::string& text) {
 }
 
 Network::~Network() { stop(); if(worker_.joinable()) worker_.join(); }
-bool Network::start(const std::wstring& url,const std::wstring& nick) {
+bool Network::start(const std::wstring& url,const std::wstring& nick,unsigned waitMs) {
     if(running_) return false;
+    wait_=waitMs;
     Endpoint endpoint;
     if(!ParseUrl(url,endpoint)) { report(L"http:// 또는 https://로 시작하는 방 주소를 입력해 주세요."); return false; }
     if(worker_.joinable()) worker_.join();
@@ -89,24 +91,32 @@ void Network::run(std::wstring url,std::string nick) {
     if(!ParseUrl(url,endpoint)) return;
     const Internet session(WinHttpOpen(L"Basic FPS DX11 trial/1",WINHTTP_ACCESS_TYPE_NO_PROXY,nullptr,nullptr,0));
     if(!session.h || !WinHttpSetTimeouts(session.h,3000,3000,3000,5000)) { report(L"Windows 연결 도구를 준비하지 못했어요."); return; }
-    const Internet connection(WinHttpConnect(session.h,endpoint.host.c_str(),endpoint.port,0));
-    if(!connection.h || stopping_) { report(L"방 주소에 연결하지 못했어요."); return; }
-    // Keep the request alive until upgrade; never follow redirects or weaken TLS validation.
-    const Internet request(WinHttpOpenRequest(connection.h,L"GET",endpoint.path.c_str(),nullptr,nullptr,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,endpoint.secure?WINHTTP_FLAG_SECURE:0));
-    DWORD redirects=WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
-    if(!request.h || !WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&redirects,sizeof redirects) ||
-        !WinHttpSetOption(request.h,WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET,nullptr,0) ||
-        !WinHttpSendRequest(request.h,nullptr,0,nullptr,0,0,0) || !WinHttpReceiveResponse(request.h,nullptr) || stopping_) {
-        report(L"방에 연결하지 못했어요. 방이 열려 있는지와 주소를 확인해 주세요."); return;
+    // A room started by this app needs a moment to listen, so retry until the caller's wait expires.
+    const auto deadline=GetTickCount64()+wait_;
+    Internet connection(nullptr),socket(nullptr);
+    for(;;) {
+        std::wstring failure=L"방에 연결하지 못했어요. 방이 열려 있는지와 주소를 확인해 주세요.";
+        socket.reset(); connection.reset(WinHttpConnect(session.h,endpoint.host.c_str(),endpoint.port,0));
+        if(connection.h) {
+            // Keep the request alive until upgrade; never follow redirects or weaken TLS validation.
+            const Internet request(WinHttpOpenRequest(connection.h,L"GET",endpoint.path.c_str(),nullptr,nullptr,
+                WINHTTP_DEFAULT_ACCEPT_TYPES,endpoint.secure?WINHTTP_FLAG_SECURE:0));
+            DWORD redirects=WINHTTP_OPTION_REDIRECT_POLICY_NEVER,status=0,size=sizeof status;
+            if(request.h && WinHttpSetOption(request.h,WINHTTP_OPTION_REDIRECT_POLICY,&redirects,sizeof redirects) &&
+                WinHttpSetOption(request.h,WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET,nullptr,0) &&
+                WinHttpSendRequest(request.h,nullptr,0,nullptr,0,0,0) && WinHttpReceiveResponse(request.h,nullptr)) {
+                if(WinHttpQueryHeaders(request.h,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
+                    WINHTTP_HEADER_NAME_BY_INDEX,&status,&size,WINHTTP_NO_HEADER_INDEX) && status==101) {
+                    socket.reset(WinHttpWebSocketCompleteUpgrade(request.h,0));
+                    failure=L"게임 방 통신을 시작하지 못했어요.";
+                } else failure=L"이 주소에서 게임 방 응답을 받지 못했어요.";
+            }
+        } else failure=L"방 주소에 연결하지 못했어요.";
+        if(stopping_) return;
+        if(socket.h) break;
+        if(GetTickCount64()>=deadline) { report(failure); return; }
+        Sleep(250);
     }
-    DWORD status=0,size=sizeof status;
-    if(!WinHttpQueryHeaders(request.h,WINHTTP_QUERY_STATUS_CODE|WINHTTP_QUERY_FLAG_NUMBER,
-        WINHTTP_HEADER_NAME_BY_INDEX,&status,&size,WINHTTP_NO_HEADER_INDEX) || status!=101) {
-        report(L"이 주소에서 게임 방 응답을 받지 못했어요."); return;
-    }
-    const Internet socket(WinHttpWebSocketCompleteUpgrade(request.h,0));
-    if(!socket.h) { report(L"게임 방 통신을 시작하지 못했어요."); return; }
     DWORD closeTimeout=750;
     if(!WinHttpSetOption(socket.h,WINHTTP_OPTION_WEB_SOCKET_CLOSE_TIMEOUT,&closeTimeout,sizeof closeTimeout)) {
         report(L"게임 방 연결을 초기화하지 못했어요."); return;

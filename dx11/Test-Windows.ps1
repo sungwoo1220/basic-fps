@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$GameExe,[Parameter(Mandatory=$true)][string]$OutputRoot)
 $ErrorActionPreference='Stop'
-$repo=Split-Path $PSScriptRoot -Parent
 $GameExe=(Resolve-Path $GameExe).Path
 $null=New-Item -ItemType Directory -Path $OutputRoot -Force
 $OutputRoot=(Resolve-Path $OutputRoot).Path
@@ -14,7 +13,8 @@ $oldPort=$env:PORT
 $log=Join-Path $OutputRoot 'network.txt'
 try {
     $env:PORT=[string]$port
-    $server=Start-Process -FilePath (Get-Command node).Source -WorkingDirectory $repo -ArgumentList ('"'+(Join-Path $repo 'game/server.js')+'"') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $OutputRoot 'room.txt') -RedirectStandardError (Join-Path $OutputRoot 'room-error.txt')
+    $room=Join-Path (Split-Path $GameExe) 'room'
+    $server=Start-Process -FilePath (Join-Path $room 'node.exe') -WorkingDirectory $room -ArgumentList ('"'+(Join-Path $room 'server.js')+'"') -PassThru -NoNewWindow -RedirectStandardOutput (Join-Path $OutputRoot 'room.txt') -RedirectStandardError (Join-Path $OutputRoot 'room-error.txt')
     $env:PORT=$oldPort
     $url="http://127.0.0.1:$port"
     $ready=$false
@@ -27,6 +27,17 @@ try {
     if(-not $client.WaitForExit(30000)) { throw 'The DX11 network test timed out.' }
     if(Test-Path $log) { Get-Content $log }
     if($client.ExitCode -ne 0 -or -not (Test-Path $log) -or -not (Select-String -Path $log -SimpleMatch 'PASS: Windows DX11 client')) { throw 'The built client did not pass join, movement, fire and reload.' }
+    Stop-Process -Id $server.Id -Force
+    $server=$null
+    # The app must open its own room from the bundled files: no Node on PATH or NODE_PATH helps it.
+    $hostLog=Join-Path $OutputRoot 'host.txt'
+    $oldPath=$env:PATH; $oldNodePath=$env:NODE_PATH
+    $env:PATH="$env:SystemRoot\System32;$env:SystemRoot"; $env:NODE_PATH=$null
+    try { $client=Start-Process -FilePath $GameExe -PassThru -ArgumentList ('--host-smoke "'+$hostLog+'"') }
+    finally { $env:PATH=$oldPath; $env:NODE_PATH=$oldNodePath }
+    if(-not $client.WaitForExit(45000)) { throw 'The self-hosted room test timed out.' }
+    if(Test-Path $hostLog) { Get-Content $hostLog }
+    if($client.ExitCode -ne 0 -or -not (Select-String -Path $hostLog -SimpleMatch 'PASS: Windows DX11 client')) { throw 'The app could not open its own room and play in it.' }
     $client=Start-Process -FilePath $GameExe -PassThru -ArgumentList ('--render-smoke "'+$OutputRoot+'"')
     if(-not $client.WaitForExit(45000)) { throw 'The DX11 software rendering test timed out.' }
     $renderError=Join-Path $OutputRoot 'render-error.txt'
@@ -44,7 +55,7 @@ try {
         }
         if(-not $varied) { throw "Flat render output for MSAA $samples." }
     }
-    Write-Host 'PASS: Windows executable network smoke and DX11 software render (off, 2x, 4x). No physical GPU/exclusive test.'
+    Write-Host 'PASS: Windows executable joined another room, opened and played in its own bundled room, and DX11 software render (off, 2x, 4x). No physical GPU/exclusive test.'
 } finally {
     $env:PORT=$oldPort
     foreach($process in @($client,$server)) {
