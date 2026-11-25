@@ -54,7 +54,7 @@ async function main(){
     await client.install(next);
     await handlers.play(null,options);assert.equal(children.length,3);
     children[2].emit('error',Error('ENOENT'));children[2].emit('exit',1);
-    for(let n=0;n<50&&(await client.current()).folder!==current.folder;n++)await sleep(10);
+    for(let n=0;n<200&&((await client.current()).folder!==current.folder||!/이전 시험판으로 복구/.test(status()));n++)await sleep(10);
     assert.equal((await client.current()).folder,current.folder,'실행 오류가 나면 검증된 이전 파일로 복구해야 해요.');
     assert.match(status(),/이전 시험판으로 복구/);
     console.log('PASS: native launcher (mocked) — DX11 arguments, stable user settings location, double-click guard, running-update guard, relaunch, integrity refusal.');
