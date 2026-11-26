@@ -15,6 +15,14 @@ const count = (value, min, max, fallback) => {
 };
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 const hash = async token => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+// One person can hold a whole IPv6 /64, so the per-host room limit counts that block instead of a single address.
+function ipKey(ip) {
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const a = head ? head.split(':') : [], b = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b] : a;
+  return groups.slice(0, 4).map(g => (parseInt(g, 16) || 0).toString(16)).join(':');
+}
 const address = (ip, port) => `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`;
 
 // Opens the host's public address from outside its network and expects the room's HTTP answer.
@@ -48,7 +56,7 @@ async function owned(env, req, id) {
 async function list(env, req) {
   const now = Date.now(), you = clientIp(req);
   const { results } = await env.DB.prepare(
-    'SELECT * FROM rooms WHERE updated_at > ? ORDER BY players DESC, created_at ASC LIMIT 50',
+    'SELECT * FROM rooms WHERE updated_at > ? ORDER BY reachable DESC, players DESC, created_at ASC LIMIT 50',
   ).bind(now - ALIVE_MS).all();
   return json({
     you,
@@ -71,8 +79,9 @@ async function create(env, req) {
   const lan = LAN.test(String(body.lan || '')) ? String(body.lan) : '';
   const now = Date.now();
   await env.DB.prepare('DELETE FROM rooms WHERE updated_at < ?').bind(now - FORGET_MS).run();
-  const mine = await env.DB.prepare('SELECT COUNT(*) AS n FROM rooms WHERE ip = ? AND updated_at > ?').bind(ip, now - ALIVE_MS).first();
-  if ((mine?.n || 0) >= PER_IP) return json({ error: '한 곳에서 동시에 올릴 수 있는 방은 3개까지예요.' }, 429);
+  const { results: live } = await env.DB.prepare('SELECT ip FROM rooms WHERE updated_at > ?').bind(now - ALIVE_MS).all();
+  const key = ipKey(ip);
+  if (live.filter(r => ipKey(r.ip) === key).length >= PER_IP) return json({ error: '한 곳에서 동시에 올릴 수 있는 방은 3개까지예요.' }, 429);
   const id = crypto.randomUUID(), token = hex(crypto.getRandomValues(new Uint8Array(24)));
   const open = await reachable(ip, port);
   await env.DB.prepare(
@@ -87,10 +96,13 @@ async function beat(env, req, id) {
   if (!room) return json({ error: '목록에서 사라진 방이에요.' }, 404);
   const body = await req.json().catch(() => ({}));
   const now = Date.now();
-  let open = !!room.reachable, checked = room.checked_at;
-  if (!open && now - room.checked_at > RECHECK_MS) { open = await reachable(room.ip, room.port); checked = now; }
-  await env.DB.prepare('UPDATE rooms SET players = ?, reachable = ?, checked_at = ?, updated_at = ? WHERE id = ?')
-    .bind(count(body.players, 0, 16, room.players), open ? 1 : 0, checked, now, id).run();
+  // The host's address can change (router restart, mobile network): follow it, and test the new one at once.
+  const ip = clientIp(req) || room.ip, moved = ip !== room.ip;
+  let open = !moved && !!room.reachable, checked = moved ? 0 : room.checked_at;
+  // Re-test periodically in both directions so a closed port or a lost port-forward does not stay "reachable".
+  if (now - checked > RECHECK_MS) { open = await reachable(ip, room.port); checked = now; }
+  await env.DB.prepare('UPDATE rooms SET ip = ?, players = ?, reachable = ?, checked_at = ?, updated_at = ? WHERE id = ?')
+    .bind(ip, count(body.players, 0, 16, room.players), open ? 1 : 0, checked, now, id).run();
   return json({ ok: true, reachable: open });
 }
 

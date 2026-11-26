@@ -11,11 +11,13 @@ jobs:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
       - name: Check toolchain version rules (not a Windows or Unreal build)
         shell: pwsh
         run: ./windows/Test-Toolchain.ps1
-      - run: npm install
+      - run: npm ci
       - run: npm test

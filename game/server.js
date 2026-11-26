@@ -31,6 +31,15 @@ const assets=new Map(Object.entries(routes).map(([url,name])=>{
   }];
 }));
 const localAddresses=['127.0.0.1','::1','::ffff:127.0.0.1'];
+const maxPerAddress=4,idleKickMs=60000;
+const connectionsByAddress=new Map();
+// The room page and the native clients are the only privileged callers. A web page opened on the host's own PC must not
+// be able to drive "bots": browsers always send Origin, and it only matches the room's own address for the room's own page.
+const sameOrigin=req=>{
+  const origin=req.headers.origin;
+  if(!origin)return true;
+  try{return new URL(origin).host===req.headers.host;}catch{return false;}
+};
 const round=(value,scale)=>Math.round(value*scale)/scale;
 const server=http.createServer((req,res)=>{
   let pathname;
@@ -77,7 +86,8 @@ function broadcast(event) {
 }
 function spawn(p) {
   let best=arena.spawns[0],bestScore=-1;
-  for(const s of arena.spawns) {
+  if(p.bot&&p.home)best=p.home;
+  else for(const s of arena.spawns) {
     let score=Infinity;
     for(const q of players.values())if(q!==p)score=Math.min(score,(s[0]-q.x)**2+(s[1]-q.z)**2);
     if(score>bestScore) {
@@ -163,7 +173,14 @@ function shoot(p,now,viewTime) {
 }
 wss.on('connection',(ws,req)=>{
   // Read the peer address now: ws._socket is gone once the connection starts closing.
-  const local=localAddresses.includes(req.socket.remoteAddress);
+  const address=req.socket.remoteAddress;
+  const local=localAddresses.includes(address)&&sameOrigin(req);
+  // Rooms are listed publicly, so one address must not be able to fill every slot with idle sockets.
+  const sameAddress=connectionsByAddress.get(address)||0;
+  if(!localAddresses.includes(address)&&sameAddress>=maxPerAddress) {
+    ws.close(1008,'Too many connections');
+    return;
+  }
   if(players.size>=16) {
     send(ws,JSON.stringify({
       type:'error',message:'서버가 가득 찼습니다 (16명).'
@@ -172,10 +189,11 @@ wss.on('connection',(ws,req)=>{
     return;
   }
   const p={
-    id:String(nextId++),ws,name:'Player',x:0,z:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:0,ack:0,received:0,queue:[],credit:2,fire:false,lastShot:-1000,lastInput:performance.now(),rateTime:performance.now(),rate:0,alive:true
+    id:String(nextId++),ws,name:'Player',x:0,z:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:0,ack:0,received:0,queue:[],credit:2,fire:false,lastShot:-1000,lastInput:performance.now(),lastInputWall:Date.now(),rateTime:performance.now(),rate:0,alive:true
   };
   spawn(p);
   players.set(p.id,p);
+  connectionsByAddress.set(address,sameAddress+1);
   send(ws,JSON.stringify({
     type:'welcome',id:p.id
   }));
@@ -205,6 +223,7 @@ wss.on('connection',(ws,req)=>{
     if(m.type==='bots'&&local){setBots(Math.max(0,Math.min(6,Math.floor(Number(m.count)||0))));return;}
     if(m.type!=='inputs'||!Array.isArray(m.items)||m.items.length>12)return;
     p.lastInput=now;
+    p.lastInputWall=Date.now();
     for(const i of m.items) {
       if(!i||!Number.isSafeInteger(i.seq)||i.seq<=p.received||i.seq>p.received+600||!Number.isFinite(i.yaw)||!Number.isFinite(i.pitch)||!Number.isInteger(i.keys)||i.keys<0||i.keys>63||i.epoch!==p.epoch)continue;
       p.received=i.seq;
@@ -219,13 +238,18 @@ wss.on('connection',(ws,req)=>{
   });
   ws.on('error',()=>{
   });
-  ws.on('close',()=>players.delete(p.id));
+  ws.on('close',()=>{
+    players.delete(p.id);
+    const left=(connectionsByAddress.get(address)||1)-1;
+    if(left>0)connectionsByAddress.set(address,left);else connectionsByAddress.delete(address);
+  });
 });
 function setBots(count){
-  for(const [id,p] of players)if(p.bot)players.delete(id);
+  for(const [id,p] of players)if(p.bot&&Number(id.slice(4))>=count)players.delete(id);
   const positions=[[-6,-13],[0,-13],[6,-13],[-6,13],[0,13],[6,13]];
   for(let n=0;n<count&&players.size<16;n++){
-    const p={id:'bot-'+n,bot:true,mode:n%2?'strafe':'still',phase:n,name:n%2?'이동봇 '+(n+1):'정지봇 '+(n+1),x:positions[n][0],z:positions[n][1],vx:0,vz:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:1,ack:0,queue:[],shieldUntil:0,bloom:0};
+    if(players.has('bot-'+n))continue;
+    const p={id:'bot-'+n,bot:true,home:positions[n],mode:n%2?'strafe':'still',phase:n,name:n%2?'이동봇 '+(n+1):'정지봇 '+(n+1),x:positions[n][0],z:positions[n][1],vx:0,vz:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:1,ack:0,queue:[],shieldUntil:0,bloom:0};
     players.set(p.id,p);
   }
 }
@@ -273,7 +297,7 @@ setInterval(()=>{
 setInterval(()=>{
   for(const p of players.values()) {
     if(p.bot)continue;
-    if(!p.alive) {
+    if(!p.alive||Date.now()-p.lastInputWall>idleKickMs) {
       p.ws.terminate();
       continue;
     }

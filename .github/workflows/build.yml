@@ -2,24 +2,36 @@ name: Build and release
 on:
   push:
     branches: [main]
+    # Docs, the DX11 trial, the download site and the room-board worker never change the launcher or game patch.
+    paths-ignore:
+      - '**.md'
+      - 'dx11/**'
+      - 'site/**'
+      - 'worker-site/**'
+      - 'wrangler.jsonc'
+      - 'schema.sql'
   workflow_dispatch:
-permissions:
-  contents: write
+# A cancelled run could leave a half-uploaded release that the launcher would pick up as "latest".
 concurrency:
   group: release-main
-  cancel-in-progress: true
+  cancel-in-progress: false
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: windows-latest
     steps:
+      # Build steps run npm install scripts, so they get a read-only token that is not left in .git.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
       - name: Check Windows toolchain scripts (not an Unreal build)
         shell: powershell
         run: ./windows/Test-Toolchain.ps1
-      - run: npm install
+      - run: npm ci
       - name: Bundle Three.js
         shell: pwsh
         run: Copy-Item node_modules/three/build/three.module.js game/public/three.module.js
@@ -30,8 +42,6 @@ jobs:
           node --check game/server.js
           node --input-type=module --check < game/public/game.js
       - name: Build installer
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
           npm run build -- --publish never
@@ -41,8 +51,32 @@ jobs:
         run: |
           $env:RELEASE_TAG = "build-${{ github.run_number }}-${{ github.run_attempt }}"
           node publish.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            dist/Basic-FPS-Launcher-Setup.exe
+            patch/
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: files
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: gh release create "build-${{ github.run_number }}-${{ github.run_attempt }}" dist/Basic-FPS-Launcher-Setup.exe patch/* --title "Basic FPS build ${{ github.run_number }}" --notes "12-round magazine and reload controls."
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: build-${{ github.run_number }}-${{ github.run_attempt }}
+          RUN_NUMBER: ${{ github.run_number }}
+          SOURCE_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          notes="${COMMIT_MESSAGE:-Manual build}"
+          gh release create "$RELEASE_TAG" files/dist/Basic-FPS-Launcher-Setup.exe files/patch/* \
+            --target "$SOURCE_SHA" --title "Basic FPS build $RUN_NUMBER" --notes "$notes"
