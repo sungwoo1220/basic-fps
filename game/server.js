@@ -31,7 +31,8 @@ const assets=new Map(Object.entries(routes).map(([url,name])=>{
   }];
 }));
 const localAddresses=['127.0.0.1','::1','::ffff:127.0.0.1'];
-const maxPerAddress=4,idleKickMs=60000;
+// Idle sockets are dropped after 3 minutes. Hidden browser tabs send no inputs, so they send an "idle" keepalive instead.
+const maxPerAddress=4,idleKickMs=Number(process.env.IDLE_KICK_MS)||180000;
 const connectionsByAddress=new Map();
 // The room page and the native clients are the only privileged callers. A web page opened on the host's own PC must not
 // be able to drive "bots": browsers always send Origin, and it only matches the room's own address for the room's own page.
@@ -189,7 +190,7 @@ wss.on('connection',(ws,req)=>{
     return;
   }
   const p={
-    id:String(nextId++),ws,name:'Player',x:0,z:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:0,ack:0,received:0,queue:[],credit:2,fire:false,lastShot:-1000,lastInput:performance.now(),lastInputWall:Date.now(),rateTime:performance.now(),rate:0,alive:true
+    id:String(nextId++),ws,name:'Player',x:0,z:0,yaw:0,pitch:0,hp:100,kills:0,deaths:0,epoch:0,ack:0,received:0,queue:[],credit:2,fire:false,lastShot:-1000,lastInput:performance.now(),lastSeen:performance.now(),rateTime:performance.now(),rate:0,alive:true
   };
   spawn(p);
   players.set(p.id,p);
@@ -218,12 +219,13 @@ wss.on('connection',(ws,req)=>{
       return;
     }
     if(!m||typeof m!=='object')return;
+    if(m.type==='inputs'||m.type==='idle')p.lastSeen=now;
+    if(m.type==='idle')return;
     if(m.type==='reload'){reload(p,performance.now());return;}
     if(m.type==='join'&&typeof m.name==='string')p.name=m.name.replace(/[\x00-\x1f]/g,'').trim().slice(0,16)||'Player';
     if(m.type==='bots'&&local){setBots(Math.max(0,Math.min(6,Math.floor(Number(m.count)||0))));return;}
     if(m.type!=='inputs'||!Array.isArray(m.items)||m.items.length>12)return;
     p.lastInput=now;
-    p.lastInputWall=Date.now();
     for(const i of m.items) {
       if(!i||!Number.isSafeInteger(i.seq)||i.seq<=p.received||i.seq>p.received+600||!Number.isFinite(i.yaw)||!Number.isFinite(i.pitch)||!Number.isInteger(i.keys)||i.keys<0||i.keys>63||i.epoch!==p.epoch)continue;
       p.received=i.seq;
@@ -284,6 +286,7 @@ setInterval(()=>{
   snapshotElapsed+=dt;
   if(snapshotElapsed>=.05) {
     snapshotElapsed%=.05;
+    for(const p of players.values())if(!p.bot&&now-p.lastSeen>idleKickMs)p.ws.close(1008,'Idle');
     const data=JSON.stringify({
       // Positions and velocities are trimmed to millimetres: the client replays unacknowledged inputs from them, so
       // sub-millimetre digits only cost bandwidth (snapshots go to every player 20 times a second).
@@ -297,7 +300,7 @@ setInterval(()=>{
 setInterval(()=>{
   for(const p of players.values()) {
     if(p.bot)continue;
-    if(!p.alive||Date.now()-p.lastInputWall>idleKickMs) {
+    if(!p.alive) {
       p.ws.terminate();
       continue;
     }

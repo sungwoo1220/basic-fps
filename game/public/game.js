@@ -113,6 +113,7 @@ const predicted={
   x:0,z:0
 },keys=new Set(),pending=[],outgoing=[],feed=[];
 let localBloom=0,lastHitShown=false;
+let lastKeepAlive=0;
 let ownId='',epoch=-1,connected=false,initialized=false,yaw=0,pitch=0,sensitivity=1,sequence=0;
 let offsetX=0,offsetZ=0,lastTime=performance.now(),accumulator=0,lastShot=-1000,flashUntil=0,hitUntil=0,recoil=0,frames=0,fpsTime=performance.now(),lastHud='',lastBoard='',lastFeed='';
 function stored(key,fallback) {
@@ -490,6 +491,8 @@ function frame() {
   if(document.hidden) {
     lastTime=now;
     nextRenderAt=0;
+    // No inputs are simulated while hidden; tell the room we are still here so it does not drop us as idle.
+    if(connected&&now-lastKeepAlive>10000){lastKeepAlive=now;send({type:'idle'});}
     setTimeout(frame,250);
     return;
   }

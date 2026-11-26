@@ -1,6 +1,7 @@
 #include "Network.h"
 #include "Protocol.h"
 #include <winhttp.h>
+#include <algorithm>
 #include <array>
 #include <cwctype>
 
@@ -158,7 +159,14 @@ void Network::reader(void* socket) {
         message.append(buffer.data(),count);
         if(type==WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE) {
             std::lock_guard<std::mutex> lock(mutex_);
-            if(incoming_.size()>=96) break;
+            // The game thread can stall (window drag/resize runs a modal loop). Snapshots supersede each other, so
+            // drop the oldest one instead of disconnecting; other events are dropped only if nothing else is left.
+            if(incoming_.size()>=256) {
+                const auto stale=std::find_if(incoming_.begin(),incoming_.end(),[](const std::string& packet) {
+                    return packet.rfind("{\"type\":\"state\"",0)==0;
+                });
+                incoming_.erase(stale!=incoming_.end()?stale:incoming_.begin());
+            }
             incoming_.push_back(std::move(message)); message.clear();
         }
     }
