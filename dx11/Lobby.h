@@ -8,7 +8,7 @@
 #include <vector>
 
 namespace Trial {
-// One open room as the board at basic-fps.baze.cloud lists it. The host's own PC runs the room.
+// One open room as the board at basic-fps.basic-fps-launcher.workers.dev lists it. The host's own PC runs the room.
 struct LobbyRoom {
     std::wstring name, host, address, lan;
     int players=0, max=16;

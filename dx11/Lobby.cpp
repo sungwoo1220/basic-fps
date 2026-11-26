@@ -20,7 +20,7 @@ struct Internet {
 struct Board { std::wstring host; INTERNET_PORT port=INTERNET_DEFAULT_HTTPS_PORT; bool secure=true; };
 // BASIC_FPS_LOBBY=http://127.0.0.1:8787 points a test build at a local board.
 Board Where() {
-    Board board{L"basic-fps.baze.cloud"};
+    Board board{L"basic-fps.basic-fps-launcher.workers.dev"};
     wchar_t* custom=nullptr; size_t size=0;
     if(_wdupenv_s(&custom,&size,L"BASIC_FPS_LOBBY")==0 && custom) {
         std::wstring url=custom; free(custom);

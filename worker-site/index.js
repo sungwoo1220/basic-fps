@@ -72,8 +72,8 @@ async function create(env, req) {
   const ip = clientIp(req);
   if (!ip) return json({ error: '주소를 확인하지 못했어요.' }, 400);
   const body = await req.json().catch(() => ({}));
-  const port = count(body.port, 1, 65535, 0);
-  if (!port) return json({ error: '포트가 올바르지 않아요.' }, 400);
+  const port = Number(body.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return json({ error: '포트가 올바르지 않아요.' }, 400);
   const host = text(body.host, 16) || 'Player';
   const name = text(body.name, 24) || `${host}의 방`;
   const lan = LAN.test(String(body.lan || '')) ? String(body.lan) : '';

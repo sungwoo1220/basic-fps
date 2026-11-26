@@ -1,0 +1,10 @@
+// Own-Cloudflare deployment of the room board (the DX11 app reads this one). wrangler.jsonc stays for the BAZE copy.
+// Deploy: npx wrangler deploy -c wrangler.cloudflare.jsonc
+{
+  "name": "basic-fps",
+  "main": "worker-site/index.js",
+  "compatibility_date": "2025-11-02",
+  "workers_dev": true,
+  "assets": { "directory": "./site", "not_found_handling": "404-page", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "basic-fps-rooms", "database_id": "5539303c-77fa-4615-9e07-9d30c8bb407b" }]
+}
