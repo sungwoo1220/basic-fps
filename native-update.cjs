@@ -2,15 +2,47 @@
 const fs=require('fs/promises'),rawFs=require('fs'),path=require('path'),crypto=require('crypto');
 const REPO='sungwoo1220/basic-fps';
 const MAX_CHUNK=8*1024*1024,MAX_TOTAL=4*1024*1024*1024;
-const folderOK=value=>typeof value==='string'&&/^ue-[0-9]+-[0-9]+-[a-f0-9]{12}$/.test(value);
+// A profile says which release channel a NativeClient follows. UNREAL keeps the original names and Korean texts exactly:
+// tests match them. DX11 is the self-contained Windows trial the launcher installs and starts.
+const UNREAL={
+  kind:'unreal',tagPrefix:'ue-test-',tagPattern:/^ue-test-\d+-\d+$/,manifestName:'unreal-update.json',folderPrefix:'ue',
+  executablePattern:/(?:^|\/)BasicFPS\/Binaries\/Win64\/BasicFPS(?:-Win64-(?:Development|Shipping))?\.exe$/,
+  text:{
+    badManifest:'언리얼 업데이트 목록 형식이 올바르지 않아요.',
+    none:'아직 다운로드할 언리얼 시험판이 없어요. Windows 빌드 PC 연결과 빌드 성공이 먼저 필요해요.',
+    busy:'이미 언리얼 게임을 업데이트하고 있어요.',
+    checking:'언리얼 시험판을 확인하고 있어요…',
+    upToDate:'이미 최신 언리얼 시험판이에요.',
+    downloading:(percent,done,total)=>`언리얼 다운로드 ${percent}% · ${done} / ${total}MB`,
+    ready:version=>`언리얼 시험판 ${version} 준비 완료 · Windows 실기 확인이 필요해요.`,
+    notInstalled:'언리얼 시험판을 먼저 다운로드해 주세요.',
+    changed:'설치된 게임 파일이 달라졌어요. 언리얼 시험판을 다시 다운로드해 주세요.',
+  },
+};
+const DX11={
+  kind:'dx11',tagPrefix:'dx11-test-',tagPattern:/^dx11-test-\d+-\d+$/,manifestName:'dx11-update.json',folderPrefix:'dx11',
+  executablePattern:/^BasicFPS-DX11\.exe$/,
+  text:{
+    badManifest:'게임 업데이트 목록 형식이 올바르지 않아요.',
+    none:'아직 다운로드할 게임이 없어요. 잠시 뒤에 다시 시도해 주세요.',
+    busy:'이미 게임을 업데이트하고 있어요.',
+    checking:'게임 업데이트를 확인하고 있어요…',
+    upToDate:'이미 최신 게임이에요.',
+    downloading:(percent,done,total)=>`게임 다운로드 ${percent}% · ${done} / ${total}MB`,
+    ready:version=>`게임 ${version} 준비 완료`,
+    notInstalled:'게임이 아직 설치되지 않았어요. 업데이트를 먼저 해 주세요.',
+    changed:'설치된 게임 파일이 달라졌어요. 게임을 다시 내려받아 주세요.',
+  },
+};
+const folderPattern=profile=>new RegExp(`^${profile.folderPrefix}-[0-9]+-[0-9]+-[a-f0-9]{12}$`);
 function safePath(value){
   return typeof value==='string'&&value.length<=240&&/^[a-zA-Z0-9._ /-]+$/.test(value)&&value.split('/').every(part=>
     part&&part!=='.'&&part!=='..'&&!/[. ]$/.test(part)&&!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
 }
-function validateManifest(m){
-  if(!m||m.schema!==2||m.kind!=='unreal'||m.platform!=='win64'||!/^ue-test-\d+-\d+$/.test(m.build)||
+function validateManifest(m,profile=UNREAL){
+  if(!m||m.schema!==2||m.kind!==profile.kind||m.platform!=='win64'||typeof m.build!=='string'||!profile.tagPattern.test(m.build)||
     !/^\d+\.\d+\.\d+$/.test(m.version)||!Array.isArray(m.files)||!m.files.length||m.files.length>4096||
-    !safePath(m.executable)||!/(?:^|\/)BasicFPS\/Binaries\/Win64\/BasicFPS(?:-Win64-(?:Development|Shipping))?\.exe$/.test(m.executable))throw Error('언리얼 업데이트 목록 형식이 올바르지 않아요.');
+    !safePath(m.executable)||!profile.executablePattern.test(m.executable))throw Error(profile.text.badManifest);
   let total=0;const names=new Set();
   for(const file of m.files){
     if(!safePath(file.path)||names.has(file.path.toLowerCase())||!Number.isSafeInteger(file.size)||file.size<0||file.size>2*1024*1024*1024||
@@ -31,7 +63,10 @@ function validateManifest(m){
 }
 async function hashFile(file){const hash=crypto.createHash('sha256');for await(const data of rawFs.createReadStream(file))hash.update(data);return hash.digest('hex');}
 class NativeClient {
-  constructor({root,emit=()=>{},fetch:fetcher=(...args)=>fetch(...args)}){this.root=root;this.emit=emit;this.fetch=fetcher;this.busy=false;}
+  constructor({root,emit=()=>{},fetch:fetcher=(...args)=>fetch(...args),progress=()=>{},profile=UNREAL}){
+    this.root=root;this.emit=emit;this.fetch=fetcher;this.progress=progress;this.profile=profile;this.busy=false;
+    const pattern=folderPattern(profile);this.folderOK=value=>typeof value==='string'&&pattern.test(value);
+  }
   async download(url,max){
     const response=await this.fetch(url,{signal:AbortSignal.timeout(120000),headers:{'User-Agent':'BasicFPS-Launcher',Accept:url.startsWith('https://api.github.com/')?'application/vnd.github+json':'application/octet-stream'}});
     if(!response.ok)throw Error('다운로드에 실패했어요. HTTP '+response.status);
@@ -39,24 +74,26 @@ class NativeClient {
     return Buffer.concat(parts);
   }
   async latest(){
-    for(let page=1;page<=5;page++){
-      const bytes=await this.download(`https://api.github.com/repos/${REPO}/releases?per_page=20&page=${page}`,4*1024*1024);
+    const {profile}=this;
+    // 100 per page and three pages: every push to main adds a "build-*" release, so a short list could hide the trial releases.
+    for(let page=1;page<=3;page++){
+      const bytes=await this.download(`https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`,8*1024*1024);
       const releases=JSON.parse(bytes.toString('utf8'));if(!Array.isArray(releases))throw Error('릴리스 목록을 읽지 못했어요.');
       for(const release of releases){
-        if(!release.prerelease||release.draft||!/^ue-test-\d+-\d+$/.test(release.tag_name)||!Array.isArray(release.assets))continue;
-        const expected=`https://github.com/${REPO}/releases/download/${release.tag_name}/unreal-update.json`;
-        const asset=release.assets.find(item=>item.name==='unreal-update.json'&&item.browser_download_url===expected);if(!asset)continue;
-        const manifest=validateManifest(JSON.parse((await this.download(expected,4*1024*1024)).toString('utf8')));
+        if(!release.prerelease||release.draft||!profile.tagPattern.test(release.tag_name)||!Array.isArray(release.assets))continue;
+        const expected=`https://github.com/${REPO}/releases/download/${release.tag_name}/${profile.manifestName}`;
+        const asset=release.assets.find(item=>item.name===profile.manifestName&&item.browser_download_url===expected);if(!asset)continue;
+        const manifest=validateManifest(JSON.parse((await this.download(expected,4*1024*1024)).toString('utf8')),profile);
         if(manifest.build!==release.tag_name)throw Error('릴리스와 게임 목록이 일치하지 않아요.');return manifest;
       }
-      if(releases.length<20)break;
+      if(releases.length<100)break;
     }
-    throw Error('아직 다운로드할 언리얼 시험판이 없어요. Windows 빌드 PC 연결과 빌드 성공이 먼저 필요해요.');
+    throw Error(profile.text.none);
   }
   async current(){
     try{
-      const pointer=JSON.parse(await fs.readFile(path.join(this.root,'current.json'),'utf8'));if(!folderOK(pointer.folder))return null;
-      const dir=path.join(this.root,pointer.folder),manifest=validateManifest(JSON.parse(await fs.readFile(path.join(dir,'manifest.json'),'utf8')));
+      const pointer=JSON.parse(await fs.readFile(path.join(this.root,'current.json'),'utf8'));if(!this.folderOK(pointer.folder))return null;
+      const dir=path.join(this.root,pointer.folder),manifest=validateManifest(JSON.parse(await fs.readFile(path.join(dir,'manifest.json'),'utf8')),this.profile);
       return {...pointer,dir,manifest,executable:path.join(dir,...manifest.executable.split('/'))};
     }catch{return null;}
   }
@@ -65,16 +102,17 @@ class NativeClient {
     await fs.writeFile(file+'.tmp',JSON.stringify(pointer));await fs.rename(file+'.tmp',file);
   }
   async install(supplied){
-    if(this.busy)throw Error('이미 언리얼 게임을 업데이트하고 있어요.');this.busy=true;let stage;
+    const {profile}=this,{text}=profile;
+    if(this.busy)throw Error(text.busy);this.busy=true;let stage;
     try{
-      this.emit('언리얼 시험판을 확인하고 있어요…');const manifest=validateManifest(supplied||await this.latest());const old=await this.current();
+      this.emit(text.checking);this.progress(0);const manifest=validateManifest(supplied||await this.latest(),profile);const old=await this.current();
       if(old&&JSON.stringify(old.manifest)===JSON.stringify(manifest)){
         let valid=true;
         for(const file of manifest.files)if(await hashFile(path.join(old.dir,...file.path.split('/'))).catch(()=>null)!==file.sha256){valid=false;break;}
-        if(valid){this.emit('이미 최신 언리얼 시험판이에요.');return old;}
+        if(valid){this.emit(text.upToDate);this.progress(1);return old;}
       }
-      const [major,attempt]=manifest.build.slice('ue-test-'.length).split('-');
-      const folder=`ue-${major}-${attempt}-${crypto.randomBytes(6).toString('hex')}`;stage=path.join(this.root,folder);await fs.mkdir(stage,{recursive:true});
+      const [major,attempt]=manifest.build.slice(profile.tagPrefix.length).split('-');
+      const folder=`${profile.folderPrefix}-${major}-${attempt}-${crypto.randomBytes(6).toString('hex')}`;stage=path.join(this.root,folder);await fs.mkdir(stage,{recursive:true});
       let done=0;const total=manifest.files.reduce((sum,file)=>sum+file.size,0);
       for(const file of manifest.files){
         const target=path.join(stage,...file.path.split('/'));await fs.mkdir(path.dirname(target),{recursive:true});
@@ -93,29 +131,30 @@ class NativeClient {
           }finally{await handle.close();}
           if(hash.digest('hex')!==file.sha256)throw Error('게임 파일 검증에 실패했어요.');
         }
-        done+=file.size;this.emit(`언리얼 다운로드 ${Math.round(done*100/Math.max(1,total))}% · ${Math.round(done/1048576)} / ${Math.round(total/1048576)}MB`);
+        done+=file.size;this.progress(done/Math.max(1,total));
+        this.emit(text.downloading(Math.round(done*100/Math.max(1,total)),Math.round(done/1048576),Math.round(total/1048576)));
       }
       await fs.writeFile(path.join(stage,'manifest.json'),JSON.stringify(manifest));
       await this.writePointer({folder,previous:old?.folder||null});stage=null;
       // Keep one known previous install; only remove directories created by this updater.
       const keep=new Set([folder,old?.folder]);
-      for(const entry of await fs.readdir(this.root))if(folderOK(entry)&&!keep.has(entry))await fs.rm(path.join(this.root,entry),{recursive:true,force:true}).catch(()=>{});
-      this.emit(`언리얼 시험판 ${manifest.version} 준비 완료 · Windows 실기 확인이 필요해요.`);return await this.current();
+      for(const entry of await fs.readdir(this.root))if(this.folderOK(entry)&&!keep.has(entry))await fs.rm(path.join(this.root,entry),{recursive:true,force:true}).catch(()=>{});
+      this.progress(1);this.emit(text.ready(manifest.version));return await this.current();
     }finally{if(stage)await fs.rm(stage,{recursive:true,force:true}).catch(()=>{});this.busy=false;}
   }
   async verifyLaunch(){
-    const installed=await this.current();if(!installed)throw Error('언리얼 시험판을 먼저 다운로드해 주세요.');
-    for(const file of installed.manifest.files)if(await hashFile(path.join(installed.dir,...file.path.split('/'))).catch(()=>null)!==file.sha256)throw Error('설치된 게임 파일이 달라졌어요. 언리얼 시험판을 다시 다운로드해 주세요.');
+    const installed=await this.current();if(!installed)throw Error(this.profile.text.notInstalled);
+    for(const file of installed.manifest.files)if(await hashFile(path.join(installed.dir,...file.path.split('/'))).catch(()=>null)!==file.sha256)throw Error(this.profile.text.changed);
     return installed;
   }
   async rollback(){
-    const current=await this.current();if(!current||!folderOK(current.previous))return false;
+    const current=await this.current();if(!current||!this.folderOK(current.previous))return false;
     const previousDir=path.join(this.root,current.previous);
     try{
-      const manifest=validateManifest(JSON.parse(await fs.readFile(path.join(previousDir,'manifest.json'),'utf8')));
+      const manifest=validateManifest(JSON.parse(await fs.readFile(path.join(previousDir,'manifest.json'),'utf8')),this.profile);
       for(const file of manifest.files)if(await hashFile(path.join(previousDir,...file.path.split('/')))!==file.sha256)return false;
     }catch{return false;}
     await this.writePointer({folder:current.previous,previous:current.folder});return true;
   }
 }
-module.exports={NativeClient,validateManifest,safePath,MAX_CHUNK};
+module.exports={NativeClient,validateManifest,safePath,MAX_CHUNK,UNREAL,DX11};
