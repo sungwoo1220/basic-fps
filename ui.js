@@ -7,6 +7,12 @@ function ready(){
   $('nativeUpdate').disabled=nativeBusy;
   $('update').disabled=nativeBusy;
 }
+let dx11Installed=false,dx11Busy=false;
+function readyDx11(){$('playDx11').disabled=dx11Busy||!dx11Installed;$('updateDx11').disabled=dx11Busy;}
+window.launcher.onDx11State(value=>{dx11Installed=value.installed;dx11Busy=value.busy;$('dx11Status').textContent=value.installed?`설치된 게임 ${value.version}`:'게임이 아직 설치되지 않았어요. 업데이트가 끝나면 플레이할 수 있어요.';readyDx11();});
+window.launcher.onProgress(value=>{$('bar').hidden=!(value>0&&value<1);$('bar').value=value;});
+$('playDx11').onclick=()=>window.launcher.play({client:'dx11',host:false,address:''});
+$('updateDx11').onclick=()=>window.launcher.updateDx11();
 window.launcher.onStatus(text=>$('status').textContent=text);
 window.launcher.onReady(value=>{browserReady=value;ready();});
 window.launcher.onNativeState(value=>{nativeReady=value.installed;nativeBusy=value.busy;$('nativeStatus').textContent=value.installed?`설치된 시험판 ${value.version} · 실기 확인 필요`:'아직 언리얼 시험판이 설치되지 않았어요. Windows 빌드가 성공한 뒤 다운로드할 수 있어요.';ready();});

@@ -4,7 +4,7 @@ const fs=require('fs/promises');
 const path=require('path');
 const crypto=require('crypto');
 const {spawn}=require('child_process');
-const {NativeClient}=require('./native-update.cjs');
+const {NativeClient,DX11}=require('./native-update.cjs');
 const repo='sungwoo1220/basic-fps';
 app.commandLine.appendSwitch('disable-frame-rate-limit');
 app.commandLine.appendSwitch('disable-gpu-vsync');
@@ -13,7 +13,10 @@ let win,server,game,nativeGame,busy=false,gameReady=false,quitting=false;
 const root=()=>path.join(app.getPath('userData'),'game');
 function emit(text){if(win&&!win.isDestroyed())win.webContents.send('status',text);}
 const native=new NativeClient({root:path.join(app.getPath('userData'),'unreal'),emit});
-async function nativeState(){const installed=await native.current();if(win&&!win.isDestroyed())win.webContents.send('native-state',{installed:!!installed,version:installed?.manifest.version||null,busy:busy||native.busy||!!nativeGame||!!game});}
+// The DX11 game is the launcher's main game: installed into userData/dx11, updated by hash, started without arguments.
+const dx11=new NativeClient({root:path.join(app.getPath('userData'),'dx11'),emit,profile:DX11,progress:value=>{if(win&&!win.isDestroyed())win.webContents.send('progress',value);}});
+async function dx11State(){const installed=await dx11.current();if(win&&!win.isDestroyed())win.webContents.send('dx11-state',{installed:!!installed,version:installed?.manifest.version||null,busy:busy||dx11.busy||!!nativeGame||!!game});}
+async function nativeState(){const installed=await native.current();if(win&&!win.isDestroyed())win.webContents.send('native-state',{installed:!!installed,version:installed?.manifest.version||null,busy:busy||native.busy||!!nativeGame||!!game});await dx11State();}
 async function current(){try{const value=JSON.parse(await fs.readFile(path.join(root(),'current.json'),'utf8'));if(!/^[a-zA-Z0-9._-]+$/.test(value.folder))throw Error('Invalid folder');return {...value,dir:path.join(root(),value.folder)};}catch{return null;}}
 function digest(data){return crypto.createHash('sha256').update(data).digest('hex');}
 async function download(url,max){
@@ -61,12 +64,37 @@ async function update(){
  }catch(e){emit('업데이트 실패: '+e.message+' · 기존 설치가 있으면 실행할 수 있습니다.');gameReady=!!(await current());win.webContents.send('ready',gameReady);}
  finally{busy=false;await nativeState();}
 }
+async function updateDx11(){
+ if(busy)return;
+ if(game||nativeGame){emit('게임을 종료한 뒤 업데이트하세요.');return;}
+ busy=true;await nativeState();
+ try{await dx11.install();}
+ catch(e){emit('게임 업데이트 실패: '+e.message+((await dx11.current())?' · 설치된 게임은 실행할 수 있어요.':''));}
+ finally{busy=false;await nativeState();}
+}
+async function startDx11(){
+ if(process.platform!=='win32')throw Error('이 게임은 Windows에서만 실행할 수 있어요.');
+ emit('파일 확인 중…');
+ const installed=await dx11.verifyLaunch();
+ const started=Date.now();let finished=false;
+ const child=spawn(installed.executable,[],{cwd:path.dirname(installed.executable),windowsHide:false,stdio:'ignore',shell:false});nativeGame=child;
+ const finish=async(code,error)=>{
+  if(finished)return;finished=true;
+  if(!quitting&&(error||(code!==0&&Date.now()-started<15000))){
+   const rolled=await dx11.rollback().catch(()=>false);emit('게임을 정상 실행하지 못했어요.'+(rolled?' 이전 버전으로 복구했어요.':''));
+  }else emit('게임을 종료했어요.');
+  nativeGame=null;await nativeState();
+ };
+ child.once('error',error=>{void finish(-1,error);});child.once('exit',code=>{void finish(code,null);});
+ emit('게임 실행 중');
+}
 async function play(host,address,client='browser'){
- if(busy||game||nativeGame||(!gameReady&&(client!=='unreal'||host)))return;
+ if(busy||game||nativeGame||(client!=='dx11'&&!gameReady&&(client!=='unreal'||host)))return;
  busy=true;await nativeState();
  try{await start(host,address,client);}catch(e){emit('실행하지 못했어요. '+e.message);if(server){server.kill();server=null;}}finally{busy=false;await nativeState();}
 }
 async function start(host,address,client='browser'){
+ if(client==='dx11')return startDx11();
  const installed=await current();if(!installed&&(host||client!=='unreal'))return;
  let nativeInstalled;
  if(client==='unreal'){
@@ -106,9 +134,11 @@ app.whenReady().then(()=>{
  win=new BrowserWindow({width:760,height:790,resizable:true,minWidth:540,minHeight:560,autoHideMenuBar:true,backgroundColor:'#111c2c',webPreferences:{preload:path.join(__dirname,'preload.cjs'),nodeIntegration:false,contextIsolation:true,sandbox:true}});
  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
  win.loadFile(path.join(__dirname,'index.html'));
- win.webContents.once('did-finish-load',()=>{void update();void nativeState();});
+ // The DX11 game first (it is what the play button starts), then the older browser game; both share the same busy lock.
+ win.webContents.once('did-finish-load',()=>{void nativeState();void updateDx11().then(()=>update());});
  ipcMain.handle('update',()=>update());
- ipcMain.handle('play',(event,args)=>play(!!args.host,String(args.address||''),args.client==='unreal'?'unreal':'browser'));
+ ipcMain.handle('dx11-update',()=>updateDx11());
+ ipcMain.handle('play',(event,args)=>play(!!args.host,String(args.address||''),args.client==='unreal'?'unreal':args.client==='dx11'?'dx11':'browser'));
  ipcMain.handle('native-update',async()=>{
   if(busy||game||nativeGame||native.busy){emit('게임이나 다른 업데이트가 끝난 뒤 다시 시도해 주세요.');return;}
   busy=true;await nativeState();
