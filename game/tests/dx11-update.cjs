@@ -81,6 +81,16 @@ async function main(){
     assert.throws(()=>pack(withoutExe,path.join(tmp,'o2'),'dx11-test-1-1'),/BasicFPS-DX11\.exe/);
     assert.throws(()=>pack(source,path.join(tmp,'o3'),'dx11-test-2-1',{maxAssets:2}),/Too many/);
     console.log('PASS: DX11 packer — 8MB chunks stored once, debug files skipped, tag/exe/output/asset-count guards.');
+
+    // Old trial releases are pruned by run/attempt number, drafts always go, other release kinds are never touched.
+    const {staleTags}=require('../../scripts/upload-dx11-release.cjs');
+    const release=(tagName,isDraft=false)=>({tagName,isDraft});
+    const all=[3,4,5,6,7,8,9].map(n=>release(`dx11-test-${n}-1`));
+    all.push(release('dx11-test-9-2'),release('build-40-1'),release('dx11-test-10-1',true),release('ue-test-4-1'),release('dx11-test-x-1'));
+    assert.deepEqual(staleTags(all,5).sort(),['dx11-test-10-1','dx11-test-3-1','dx11-test-4-1','dx11-test-5-1']);
+    assert.deepEqual(staleTags(all,20),['dx11-test-10-1'],'초안만 지워야 해요.');
+    assert.deepEqual(staleTags([],5),[]);
+    console.log('PASS: DX11 release pruning — keeps the newest by run number, removes drafts, ignores other releases.');
   }finally{await fs.rm(tmp,{recursive:true,force:true});}
 }
 main().catch(error=>{console.error('FAIL: '+error.stack);process.exitCode=1;});

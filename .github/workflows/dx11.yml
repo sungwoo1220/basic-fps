@@ -1,10 +1,10 @@
 name: DX11 Windows trial (no Epic account)
 on:
   pull_request:
-    paths: ['dx11/**', 'game/**', 'unreal/Source/BasicFPS/Public/**', '.node-version', '.github/workflows/dx11.yml']
+    paths: ['dx11/**', 'game/**', 'unreal/Source/BasicFPS/Public/**', '.node-version', '.github/workflows/dx11.yml', 'scripts/publish-dx11.cjs', 'scripts/upload-dx11-release.cjs', 'native-update.cjs']
   push:
     branches: [main]
-    paths: ['dx11/**', 'game/**', 'unreal/Source/BasicFPS/Public/**', '.node-version', '.github/workflows/dx11.yml']
+    paths: ['dx11/**', 'game/**', 'unreal/Source/BasicFPS/Public/**', '.node-version', '.github/workflows/dx11.yml', 'scripts/publish-dx11.cjs', 'scripts/upload-dx11-release.cjs', 'native-update.cjs']
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,6 +55,10 @@ jobs:
           Compress-Archive -Path "$env:RUNNER_TEMP/dx11-package/*" -DestinationPath "$out/BasicFPS-DX11-Win64.zip"
           $hash=(Get-FileHash "$out/BasicFPS-DX11-Win64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  BasicFPS-DX11-Win64.zip" | Set-Content "$out/SHA256SUMS.txt" -Encoding ascii
+      - name: Pack the files the launcher downloads (same folder as the ZIP)
+        env:
+          RELEASE_TAG: dx11-test-${{ github.run_number }}-${{ github.run_attempt }}
+        run: node scripts/publish-dx11.cjs "$env:RUNNER_TEMP/dx11-package" "$env:RUNNER_TEMP/dx11-chunks"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -64,7 +68,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: dx11-portable
-          path: ${{ runner.temp }}/dx11-download/
+          path: |
+            ${{ runner.temp }}/dx11-download/
+            ${{ runner.temp }}/dx11-chunks/
           if-no-files-found: error
   publish:
     if: github.repository == 'sungwoo1220/basic-fps' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -72,7 +78,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # Two runs must not prune each other's draft release.
+    concurrency:
+      group: dx11-publish
+      cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # Cone mode always includes the root files (native-update.cjs, .node-version) next to the scripts folder.
+          sparse-checkout: scripts
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.node-version'
       - uses: actions/download-artifact@v4
         with:
           name: dx11-portable
@@ -81,9 +99,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: dx11-test-${{ github.run_number }}-${{ github.run_attempt }}
           SOURCE_SHA: ${{ github.sha }}
-        run: |
-          gh release create "$RELEASE_TAG" download/BasicFPS-DX11-Win64.zip download/SHA256SUMS.txt \
-            --target "$SOURCE_SHA" --prerelease --latest=false --title "Basic FPS DX11 Windows 시험판" \
-            --notes "에픽 계정 없이 실행하는 별도 시험판입니다. 기존 런처 없이 ZIP을 풀고 BasicFPS-DX11.exe에서 방 만들기를 누르면 됩니다. 앱이 연 방 입장, Windows 통신과 소프트웨어 DX11 렌더링을 자동 확인했습니다. 노트북 외장 GPU·독점 전체화면·MSAA 성능은 별도 확인이 필요합니다."
+        run: node scripts/upload-dx11-release.cjs download/dx11-download download/dx11-chunks
