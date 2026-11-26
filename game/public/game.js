@@ -112,7 +112,7 @@ const predicted={
 },renderPosition={
   x:0,z:0
 },keys=new Set(),pending=[],outgoing=[],feed=[];
-let localBloom=0;
+let localBloom=0,lastHitShown=false;
 let ownId='',epoch=-1,connected=false,initialized=false,yaw=0,pitch=0,sensitivity=1,sequence=0;
 let offsetX=0,offsetZ=0,lastTime=performance.now(),accumulator=0,lastShot=-1000,flashUntil=0,hitUntil=0,recoil=0,frames=0,fpsTime=performance.now(),lastHud='',lastBoard='',lastFeed='';
 function stored(key,fallback) {
@@ -544,12 +544,17 @@ function frame() {
   gun.rotation.z=-reloadPose*.65;
   gun.rotation.x=reloadPose*.35;
   flash.visible=locked()&&now<flashUntil;
-  el.hit.style.display=now<hitUntil?'block':'none';
+  const hitShown=now<hitUntil;
+  if(hitShown!==lastHitShown) {
+    el.hit.style.display=hitShown?'block':'none';
+    lastHitShown=hitShown;
+  }
   updateRemote(now);
   updateEffects(now);
   tracers.update(now);
   while(feed.length&&feed[feed.length-1].until<=now)feed.pop();
-  const text=feed.map(x=>x.text).join('\n');
+  // Skip the per-frame string building while the kill feed is empty (the common case at hundreds of FPS).
+  const text=feed.length?feed.map(x=>x.text).join('\n'):'';
   if(text!==lastFeed) {
     el.feed.textContent=text;
     lastFeed=text;

@@ -6,6 +6,8 @@ const {
   performance
 }
 =require('perf_hooks');
+const zlib=require('zlib');
+const crypto=require('crypto');
 const {
   WebSocketServer,WebSocket
 }
@@ -19,9 +21,17 @@ const port=Number(process.env.PORT)||3000;
 const routes={
   '/three.module.js':'three.module.js','/tracer.js':'tracer.js','/':'index.html','/index.html':'index.html','/game.js':'game.js','/shared.js':'shared.js','/style.css':'style.css'
 };
-const assets=new Map(Object.entries(routes).map(([url,name])=>[url, {
-  data:fs.readFileSync(path.join(__dirname,'public',name)),mime:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html; charset=utf-8'
-}]));
+const assets=new Map(Object.entries(routes).map(([url,name])=>{
+  const data=fs.readFileSync(path.join(__dirname,'public',name));
+  const packed=data.length>1024?zlib.gzipSync(data,{level:6}):null;
+  return [url, {
+    data,gzip:packed&&packed.length<data.length?packed:null,
+    etag:'"'+crypto.createHash('sha1').update(data).digest('base64url')+'"',
+    mime:name.endsWith('.js')?'application/javascript':name.endsWith('.css')?'text/css':'text/html; charset=utf-8'
+  }];
+}));
+const localAddresses=['127.0.0.1','::1','::ffff:127.0.0.1'];
+const round=(value,scale)=>Math.round(value*scale)/scale;
 const server=http.createServer((req,res)=>{
   let pathname;
   try {
@@ -38,10 +48,21 @@ const server=http.createServer((req,res)=>{
     res.end('Not found');
     return;
   }
-  res.writeHead(200, {
-    'Content-Type':asset.mime,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'
-  });
-  res.end(asset.data);
+  // Always revalidate (the launcher swaps files on update), but answer 304 when nothing changed and send gzip when it helps.
+  const headers={
+    'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff','ETag':asset.etag,'Vary':'Accept-Encoding'
+  };
+  const known=String(req.headers['if-none-match']||'').split(',').some(tag=>tag.trim().replace(/^W\//,'')===asset.etag);
+  if(known) {
+    res.writeHead(304,headers);
+    res.end();
+    return;
+  }
+  headers['Content-Type']=asset.mime;
+  const packed=asset.gzip&&/\bgzip\b/.test(String(req.headers['accept-encoding']||''));
+  if(packed)headers['Content-Encoding']='gzip';
+  res.writeHead(200,headers);
+  res.end(packed?asset.gzip:asset.data);
 });
 const wss=new WebSocketServer({
   server,maxPayload:8192,perMessageDeflate:false
@@ -140,7 +161,9 @@ function shoot(p,now,viewTime) {
     type:'shot',id:p.id,from:o,blood:!!target,to:o.map((v,k)=>v+d[k]*Math.min(distance,50)),impact:distance<100
   });
 }
-wss.on('connection',ws=>{
+wss.on('connection',(ws,req)=>{
+  // Read the peer address now: ws._socket is gone once the connection starts closing.
+  const local=localAddresses.includes(req.socket.remoteAddress);
   if(players.size>=16) {
     send(ws,JSON.stringify({
       type:'error',message:'서버가 가득 찼습니다 (16명).'
@@ -179,7 +202,7 @@ wss.on('connection',ws=>{
     if(!m||typeof m!=='object')return;
     if(m.type==='reload'){reload(p,performance.now());return;}
     if(m.type==='join'&&typeof m.name==='string')p.name=m.name.replace(/[\x00-\x1f]/g,'').trim().slice(0,16)||'Player';
-    if(m.type==='bots'&&['127.0.0.1','::1','::ffff:127.0.0.1'].includes(ws._socket.remoteAddress)){setBots(Math.max(0,Math.min(6,Math.floor(Number(m.count)||0))));return;}
+    if(m.type==='bots'&&local){setBots(Math.max(0,Math.min(6,Math.floor(Number(m.count)||0))));return;}
     if(m.type!=='inputs'||!Array.isArray(m.items)||m.items.length>12)return;
     p.lastInput=now;
     for(const i of m.items) {
@@ -238,8 +261,10 @@ setInterval(()=>{
   if(snapshotElapsed>=.05) {
     snapshotElapsed%=.05;
     const data=JSON.stringify({
-      type:'state',serverTime:now,players:[...players.values()].map(p=>({
-        id:p.id,name:p.name,x:p.x,z:p.z,vx:p.vx,vz:p.vz,yaw:p.yaw,hp:p.hp,kills:p.kills,deaths:p.deaths,epoch:p.epoch,ack:p.ack,ammo:p.ammo??12,reloadRemaining:Math.max(0,(p.reloadUntil||0)-now),shield:now<p.shieldUntil
+      // Positions and velocities are trimmed to millimetres: the client replays unacknowledged inputs from them, so
+      // sub-millimetre digits only cost bandwidth (snapshots go to every player 20 times a second).
+      type:'state',serverTime:round(now,10),players:[...players.values()].map(p=>({
+        id:p.id,name:p.name,x:round(p.x,1000),z:round(p.z,1000),vx:round(p.vx,1000),vz:round(p.vz,1000),yaw:round(p.yaw,1000),hp:p.hp,kills:p.kills,deaths:p.deaths,epoch:p.epoch,ack:p.ack,ammo:p.ammo??12,reloadRemaining:Math.round(Math.max(0,(p.reloadUntil||0)-now)),shield:now<p.shieldUntil
       }))
     });
     for(const p of players.values())send(p.ws,data);
